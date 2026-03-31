@@ -28,7 +28,7 @@ fn admin_url() -> String {
     }
 }
 
-pub async fn ensure_postgres() -> Result<()> {
+pub async fn ensure_postgres(pg_version: u32) -> Result<()> {
     if PgPoolOptions::new().max_connections(1).connect(&admin_url()).await.is_ok() {
         return Ok(());
     }
@@ -36,21 +36,23 @@ pub async fn ensure_postgres() -> Result<()> {
     #[cfg(target_os = "macos")]
     {
         use std::process::Command;
+
+        let pkg = format!("postgresql@{pg_version}");
         tracing::info!("PostgreSQL not reachable — attempting install via Homebrew...");
 
-        let brew_check = Command::new("brew").args(["list", "postgresql@18"]).output();
+        let brew_check = Command::new("brew").args(["list", &pkg]).output();
         let already_installed = brew_check.as_ref().is_ok_and(|output| output.status.success());
 
         if already_installed {
-            tracing::info!("PostgreSQL is installed but not running, starting...");
+            tracing::info!("{pkg} is installed but not running, starting...");
         } else {
-            tracing::info!("Installing postgresql@18 via Homebrew...");
+            tracing::info!("Installing {pkg} via Homebrew...");
             let status = Command::new("brew")
-                .args(["install", "postgresql@18"])
+                .args(["install", &pkg])
                 .status()
                 .context("Failed to install PostgreSQL (is Homebrew installed?)")?;
             if !status.success() {
-                anyhow::bail!("Homebrew install failed");
+                anyhow::bail!("Homebrew install of {pkg} failed");
             }
         }
 
@@ -68,7 +70,7 @@ pub async fn ensure_postgres() -> Result<()> {
         }
 
         Command::new("brew")
-            .args(["services", "start", "postgresql@18"])
+            .args(["services", "start", &pkg])
             .status()
             .context("Failed to start PostgreSQL")?;
 

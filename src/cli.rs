@@ -14,7 +14,7 @@ pub struct Cli {
 #[derive(Subcommand)]
 pub enum Commands {
     /// Create database and schema (run once per machine)
-    Setup,
+    Setup(SetupArgs),
 
     /// Index or re-index the project (incremental)
     Index(IndexArgs),
@@ -65,6 +65,17 @@ pub enum Commands {
 
     /// Clear and re-index the project from scratch
     Reindex(IndexArgs),
+}
+
+#[derive(clap::Args, Clone)]
+pub struct SetupArgs {
+    /// `PostgreSQL` version to install (e.g. 17, 18)
+    #[arg(long, default_value_t = 18)]
+    pub pg_version: u32,
+
+    /// Skip prompts, accept defaults (for non-interactive / agent use)
+    #[arg(short, long)]
+    pub yes: bool,
 }
 
 #[derive(clap::Args, Clone)]
