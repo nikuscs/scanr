@@ -188,7 +188,7 @@ fn resolve_api_key() -> Option<String> {
     None
 }
 
-fn read_key_from_env_file(path: &Path) -> Option<String> {
+pub fn read_key_from_env_file(path: &Path) -> Option<String> {
     let content = std::fs::read_to_string(path).ok()?;
     for line in content.lines() {
         let line = line.trim();
@@ -212,4 +212,73 @@ fn read_key_from_env_file(path: &Path) -> Option<String> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn write_env_file(dir: &std::path::Path, content: &str) -> std::path::PathBuf {
+        let path = dir.join(".env");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        path
+    }
+
+    #[test]
+    fn reads_unquoted_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_env_file(dir.path(), "OPENAI_API_KEY=sk-test123\n");
+        assert_eq!(read_key_from_env_file(&path), Some("sk-test123".to_string()));
+    }
+
+    #[test]
+    fn reads_double_quoted_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_env_file(dir.path(), "OPENAI_API_KEY=\"sk-quoted\"\n");
+        assert_eq!(read_key_from_env_file(&path), Some("sk-quoted".to_string()));
+    }
+
+    #[test]
+    fn reads_single_quoted_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_env_file(dir.path(), "OPENAI_API_KEY='sk-single'\n");
+        assert_eq!(read_key_from_env_file(&path), Some("sk-single".to_string()));
+    }
+
+    #[test]
+    fn skips_comments_and_blank_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = "# This is a comment\n\nOTHER_KEY=foo\nOPENAI_API_KEY=sk-after\n";
+        let path = write_env_file(dir.path(), content);
+        assert_eq!(read_key_from_env_file(&path), Some("sk-after".to_string()));
+    }
+
+    #[test]
+    fn returns_none_if_key_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_env_file(dir.path(), "OTHER_VAR=hello\n");
+        assert_eq!(read_key_from_env_file(&path), None);
+    }
+
+    #[test]
+    fn returns_none_for_empty_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_env_file(dir.path(), "OPENAI_API_KEY=\n");
+        assert_eq!(read_key_from_env_file(&path), None);
+    }
+
+    #[test]
+    fn returns_none_for_nonexistent_file() {
+        let path = std::path::PathBuf::from("/tmp/does-not-exist-scanr-test/.env");
+        assert_eq!(read_key_from_env_file(&path), None);
+    }
+
+    #[test]
+    fn handles_spaces_around_equals() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_env_file(dir.path(), "OPENAI_API_KEY = sk-spaced\n");
+        assert_eq!(read_key_from_env_file(&path), Some("sk-spaced".to_string()));
+    }
 }

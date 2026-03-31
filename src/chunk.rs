@@ -193,7 +193,7 @@ fn is_chunk_boundary(node: &tree_sitter::Node, ext: &str) -> bool {
     }
 }
 
-fn chunk_plain(source: &str, config: &ChunkConfig) -> Vec<String> {
+pub fn chunk_plain(source: &str, config: &ChunkConfig) -> Vec<String> {
     let mut chunks = Vec::new();
     let lines: Vec<&str> = source.lines().collect();
     let mut start = 0;
@@ -217,8 +217,149 @@ fn chunk_plain(source: &str, config: &ChunkConfig) -> Vec<String> {
         }
 
         let overlap_lines = config.overlap / 40;
-        start = if end > overlap_lines { end - overlap_lines } else { end };
+        let next = if end > overlap_lines { end - overlap_lines } else { end };
+        // Ensure we always advance to avoid infinite loops
+        start = if next <= start { end } else { next };
     }
 
     chunks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_config() -> ChunkConfig {
+        ChunkConfig { size: 200, overlap: 50 }
+    }
+
+    #[test]
+    fn plain_chunk_short_content() {
+        let content = "line one\nline two\nline three";
+        let config = ChunkConfig { size: 1000, overlap: 0 };
+        let chunks = chunk_plain(content, &config);
+        assert_eq!(chunks.len(), 1);
+        assert!(chunks[0].contains("line one"));
+        assert!(chunks[0].contains("line three"));
+    }
+
+    #[test]
+    fn plain_chunk_splits_large_content() {
+        let content =
+            (0..100).map(|i| format!("this is line number {i}")).collect::<Vec<_>>().join("\n");
+        let chunks = chunk_plain(&content, &default_config());
+        assert!(chunks.len() > 1, "expected multiple chunks, got {}", chunks.len());
+    }
+
+    #[test]
+    fn plain_chunk_empty_content() {
+        let chunks = chunk_plain("", &default_config());
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn plain_chunk_whitespace_only() {
+        let chunks = chunk_plain("   \n  \n   ", &default_config());
+        assert!(chunks.is_empty());
+    }
+
+    #[test]
+    fn markdown_heading_splits() {
+        let content = "# Heading 1\nSome text.\n# Heading 2\nMore text.";
+        let chunks = chunk_markdown(content, &ChunkConfig { size: 1000, overlap: 100 });
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[0].starts_with("# Heading 1"));
+        assert!(chunks[1].starts_with("# Heading 2"));
+    }
+
+    #[test]
+    fn markdown_single_section() {
+        let content = "# Title\nJust one section with content.";
+        let chunks = chunk_markdown(content, &default_config());
+        assert_eq!(chunks.len(), 1);
+    }
+
+    #[test]
+    fn chunk_code_typescript() {
+        let content = r#"
+function hello() {
+    console.log("hello");
+}
+
+function world() {
+    console.log("world");
+}
+"#;
+        let chunks = chunk_code(content, "ts", &ChunkConfig { size: 50, overlap: 10 }).unwrap();
+        assert!(!chunks.is_empty());
+    }
+
+    #[test]
+    fn chunk_code_rust() {
+        let content = r#"
+fn main() {
+    println!("hello");
+}
+
+fn other() {
+    println!("world");
+}
+"#;
+        let chunks = chunk_code(content, "rs", &ChunkConfig { size: 200, overlap: 20 }).unwrap();
+        assert!(!chunks.is_empty());
+    }
+
+    #[test]
+    fn chunk_code_python() {
+        let content = r#"
+def hello():
+    print("hello")
+
+def world():
+    print("world")
+"#;
+        let chunks = chunk_code(content, "py", &ChunkConfig { size: 200, overlap: 20 }).unwrap();
+        assert!(!chunks.is_empty());
+    }
+
+    #[test]
+    fn chunk_code_go() {
+        let content = r#"
+package main
+
+func hello() {
+    fmt.Println("hello")
+}
+
+func world() {
+    fmt.Println("world")
+}
+"#;
+        let chunks = chunk_code(content, "go", &ChunkConfig { size: 200, overlap: 20 }).unwrap();
+        assert!(!chunks.is_empty());
+    }
+
+    #[test]
+    fn chunk_code_unknown_ext_falls_back_to_plain() {
+        let content = "some content\nmore lines\n";
+        let chunks = chunk_code(content, "xyz", &default_config()).unwrap();
+        assert!(!chunks.is_empty());
+    }
+
+    #[test]
+    fn chunk_code_javascript() {
+        let content = r#"
+function greet(name) {
+    return "Hello, " + name;
+}
+
+class Greeter {
+    constructor(name) {
+        this.name = name;
+    }
+}
+"#;
+        let chunks = chunk_code(content, "js", &ChunkConfig { size: 80, overlap: 10 }).unwrap();
+        assert!(!chunks.is_empty());
+    }
 }
