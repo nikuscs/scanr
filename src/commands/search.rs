@@ -21,11 +21,8 @@ pub async fn run(
         );
     }
 
-    let root_path = std::path::PathBuf::from(
-        fs::canonicalize(root).context("Cannot resolve project root")?.display().to_string(),
-    );
-
-    let project = root_path.display().to_string();
+    let root_path = fs::canonicalize(root).context("Cannot resolve project root")?;
+    let project = git::resolve_project_id(&root_path)?;
     let pool = db::connect().await?;
     let embedding_config =
         db::resolve_project_config(&pool, &project, &embed::EmbeddingConfig::default_openai())
@@ -51,7 +48,7 @@ pub async fn run(
     .await?;
 
     if !as_json {
-        let stale = stale_count(&pool, &project).await.unwrap_or(0);
+        let stale = stale_count(&pool, &project, &root_path).await.unwrap_or(0);
         if stale > 0 {
             let mut stderr = std::io::stderr().lock();
             writeln!(
@@ -124,7 +121,11 @@ pub async fn run(
     Ok(())
 }
 
-async fn stale_count(pool: &sqlx::PgPool, project: &str) -> Result<usize> {
+async fn stale_count(
+    pool: &sqlx::PgPool,
+    project: &str,
+    root_path: &std::path::Path,
+) -> Result<usize> {
     use sha2::{Digest, Sha256};
 
     let stored = db::get_all_hashes(pool, project).await?;
@@ -133,12 +134,11 @@ async fn stale_count(pool: &sqlx::PgPool, project: &str) -> Result<usize> {
     }
 
     let stored_map: HashMap<String, String> = stored.into_iter().collect();
-    let root = std::path::Path::new(project);
-    let current_files = crate::index::git::list_files(root, None)?;
+    let current_files = crate::index::git::list_files(root_path, None)?;
     let mut stale = 0;
 
     for rel_path in &current_files {
-        let abs_path = root.join(rel_path);
+        let abs_path = root_path.join(rel_path);
         if let Ok(content) = fs::read_to_string(&abs_path) {
             let mut hasher = Sha256::new();
             hasher.update(content.as_bytes());

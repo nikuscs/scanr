@@ -8,11 +8,10 @@ use sha2::{Digest, Sha256};
 use crate::index::{db, git};
 
 pub async fn run(root: &str) -> Result<()> {
-    let project =
-        fs::canonicalize(root).context("Cannot resolve project root")?.display().to_string();
+    let root_path = fs::canonicalize(root).context("Cannot resolve project root")?;
+    let project = git::resolve_project_id(&root_path)?;
 
     let pool = db::connect().await?;
-    let root_path = std::path::Path::new(project.as_str());
 
     let chunks = db::chunk_count(&pool, &project).await?;
     let files = db::file_count(&pool, &project).await?;
@@ -25,7 +24,7 @@ pub async fn run(root: &str) -> Result<()> {
     let stored = db::get_all_hashes(&pool, &project).await?;
 
     let stored_map: HashMap<String, String> = stored.into_iter().collect();
-    let current_files = git::list_files(root_path, None)?;
+    let current_files = git::list_files(&root_path, None)?;
     let mut stale_files: Vec<String> = Vec::new();
 
     for rel_path in &current_files {

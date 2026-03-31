@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 const CODE_EXTS: &[&str] = &[
@@ -56,6 +56,49 @@ pub fn lang_for_ext(path: &str) -> &'static str {
 
 pub fn ext_for_path(path: &str) -> &str {
     path.rsplit('.').next().unwrap_or("")
+}
+
+/// Resolve a stable project identifier for `root`.
+///
+/// Priority:
+/// 1. Git common dir parent — stable across worktrees of the same repo
+/// 2. Canonicalized path — fallback for non-git directories
+pub fn resolve_project_id(root: &Path) -> anyhow::Result<String> {
+    let canonical = std::fs::canonicalize(root)
+        .map_err(|_| anyhow::anyhow!("Cannot resolve project root: {}", root.display()))?;
+
+    // Try git-based resolution
+    if let Some(id) = git_project_id(&canonical) {
+        return Ok(id);
+    }
+
+    // Fallback: canonicalized path
+    Ok(canonical.display().to_string())
+}
+
+fn git_project_id(root: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--git-common-dir"])
+        .current_dir(root)
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let git_common_dir = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let path = if Path::new(&git_common_dir).is_absolute() {
+        PathBuf::from(git_common_dir)
+    } else {
+        root.join(git_common_dir)
+    };
+
+    let canonical_git = std::fs::canonicalize(&path).ok()?;
+
+    // Parent of .git dir = repo root
+    let repo_root = canonical_git.parent()?;
+    Some(repo_root.display().to_string())
 }
 
 #[cfg(test)]
@@ -357,5 +400,73 @@ mod tests {
         // No git init — should fail
         let result = list_files(dir.path(), None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn resolve_project_id_git_repo_returns_repo_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        Command::new("git").args(["init"]).current_dir(root).output().unwrap();
+
+        let id = resolve_project_id(root).unwrap();
+        let canonical = std::fs::canonicalize(root).unwrap();
+        assert_eq!(id, canonical.display().to_string());
+    }
+
+    #[test]
+    fn resolve_project_id_non_git_falls_back_to_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = resolve_project_id(dir.path()).unwrap();
+        let canonical = std::fs::canonicalize(dir.path()).unwrap();
+        assert_eq!(id, canonical.display().to_string());
+    }
+
+    #[test]
+    fn resolve_project_id_worktree_matches_main() {
+        let main_dir = tempfile::tempdir().unwrap();
+        let main_root = main_dir.path();
+
+        // Init main repo with a commit
+        Command::new("git").args(["init"]).current_dir(main_root).output().unwrap();
+        Command::new("git")
+            .args(["config", "user.email", "test@test.com"])
+            .current_dir(main_root)
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(main_root)
+            .output()
+            .unwrap();
+        std::fs::write(main_root.join("main.rs"), "fn main() {}").unwrap();
+        Command::new("git").args(["add", "."]).current_dir(main_root).output().unwrap();
+        Command::new("git").args(["commit", "-m", "init"]).current_dir(main_root).output().unwrap();
+
+        // Create a worktree
+        let wt_dir = tempfile::tempdir().unwrap();
+        let wt_path = wt_dir.path().join("worktree");
+        let status = Command::new("git")
+            .args(["worktree", "add", &wt_path.display().to_string(), "-b", "test-branch"])
+            .current_dir(main_root)
+            .output()
+            .unwrap();
+        assert!(status.status.success(), "git worktree add failed");
+
+        let main_id = resolve_project_id(main_root).unwrap();
+        let wt_id = resolve_project_id(&wt_path).unwrap();
+        assert_eq!(main_id, wt_id, "worktree should resolve to same project ID as main");
+    }
+
+    #[test]
+    fn resolve_project_id_subdirectory_resolves_to_repo_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        Command::new("git").args(["init"]).current_dir(root).output().unwrap();
+        std::fs::create_dir_all(root.join("src/deep")).unwrap();
+        std::fs::write(root.join("src/deep/mod.rs"), "").unwrap();
+
+        let root_id = resolve_project_id(root).unwrap();
+        let sub_id = resolve_project_id(&root.join("src/deep")).unwrap();
+        assert_eq!(root_id, sub_id, "subdirectory should resolve to repo root");
     }
 }

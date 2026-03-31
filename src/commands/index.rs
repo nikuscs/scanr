@@ -21,9 +21,8 @@ struct FileChunks {
 
 #[allow(clippy::too_many_lines)]
 pub async fn run(args: &IndexArgs) -> Result<()> {
-    let project =
-        fs::canonicalize(&args.root).context("Cannot resolve project root")?.display().to_string();
-    let root_path = PathBuf::from(&project);
+    let root_path = fs::canonicalize(&args.root).context("Cannot resolve project root")?;
+    let project = git::resolve_project_id(&root_path)?;
 
     let pool = db::connect().await?;
     let embedding_config = resolve_index_embedding_config(&pool, &project, args).await?;

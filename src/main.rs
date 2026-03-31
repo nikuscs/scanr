@@ -31,6 +31,7 @@ async fn main() -> Result<()> {
         Commands::Status { root } => commands::status::run(&root).await,
         Commands::Clear { root } => commands::clear::run(&root).await,
         Commands::Reindex(args) => commands::reindex::run(&args).await,
+        Commands::List => commands::list::run().await,
         Commands::Scan(args) => commands::scan::run(&args).await,
     }
 }

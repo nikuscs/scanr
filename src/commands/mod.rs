@@ -1,5 +1,6 @@
 pub mod clear;
 pub mod index;
+pub mod list;
 pub mod reindex;
 pub mod scan;
 pub mod search;

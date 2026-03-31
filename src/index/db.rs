@@ -502,3 +502,51 @@ pub async fn clear_project(pool: &PgPool, project: &str) -> Result<i64> {
 
     Ok(result.rows_affected() as i64)
 }
+
+pub struct ProjectSummary {
+    pub project: String,
+    pub chunks: i64,
+    pub files: i64,
+    pub embedding: Option<EmbeddingConfig>,
+    pub updated_at: Option<String>,
+}
+
+pub async fn list_projects(pool: &PgPool) -> Result<Vec<ProjectSummary>> {
+    let rows = sqlx::query(
+        "SELECT
+            p.project,
+            COALESCE(c.chunks, 0) AS chunks,
+            COALESCE(c.files, 0) AS files,
+            p.embedding_provider,
+            p.embedding_model,
+            p.embedding_dimensions,
+            TO_CHAR(p.updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI') AS updated_at
+         FROM code_index_projects p
+         LEFT JOIN (
+            SELECT metadata->>'project' AS project,
+                   COUNT(*) AS chunks,
+                   COUNT(DISTINCT metadata->>'source') AS files
+            FROM code_index_chunks
+            GROUP BY metadata->>'project'
+         ) c ON c.project = p.project
+         ORDER BY p.updated_at DESC",
+    )
+    .fetch_all(pool)
+    .await?;
+
+    let mut results = Vec::with_capacity(rows.len());
+    for row in &rows {
+        results.push(ProjectSummary {
+            project: row.get("project"),
+            chunks: row.get("chunks"),
+            files: row.get("files"),
+            embedding: Some(EmbeddingConfig {
+                provider: row.get("embedding_provider"),
+                model: row.get("embedding_model"),
+                dimensions: row.get::<i32, _>("embedding_dimensions") as u32,
+            }),
+            updated_at: row.get("updated_at"),
+        });
+    }
+    Ok(results)
+}

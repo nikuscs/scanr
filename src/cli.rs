@@ -89,6 +89,9 @@ pub enum Commands {
     /// Clear and re-index the project from scratch
     Reindex(IndexArgs),
 
+    /// List all indexed projects
+    List,
+
     /// Structural scan: extract functions, bindings, and exports from TypeScript/JavaScript files
     Scan(ScanArgs),
 }
