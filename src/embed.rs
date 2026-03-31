@@ -175,7 +175,7 @@ fn resolve_api_key() -> Option<String> {
     }
 
     let mut dir = std::env::current_dir().ok()?;
-    loop {
+    for _ in 0..6 {
         let env_file = dir.join(".env");
         if let Some(val) = read_key_from_env_file(&env_file) {
             return Some(val);
