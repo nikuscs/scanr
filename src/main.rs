@@ -22,12 +22,13 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Setup => commands::setup::run().await,
-        Commands::Index { root, file, force } => commands::index::run(&root, file, force).await,
+        Commands::Index(args) => commands::index::run(&args).await,
         Commands::Search { query, root, limit, threshold, lang, files_only, json } => {
             let q = query.join(" ");
             commands::search::run(&q, &root, limit, threshold, lang, files_only, json).await
         }
         Commands::Status { root } => commands::status::run(&root).await,
         Commands::Clear { root } => commands::clear::run(&root).await,
+        Commands::Reindex(args) => commands::reindex::run(&args).await,
     }
 }

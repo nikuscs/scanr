@@ -117,7 +117,7 @@ async fn stale_count(pool: &sqlx::PgPool, project: &str) -> Result<usize> {
 
     let stored_map: HashMap<String, String> = stored.into_iter().collect();
     let root = std::path::Path::new(project);
-    let current_files = crate::git::list_files(root)?;
+    let current_files = crate::git::list_files(root, None)?;
     let mut stale = 0;
 
     for rel_path in &current_files {

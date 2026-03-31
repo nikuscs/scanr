@@ -14,8 +14,10 @@ Walks your git repo, chunks files with tree-sitter (syntax-aware splitting), emb
 
 - **Semantic search** — find code by meaning, not just keywords
 - **Incremental** — SHA-256 hashing skips unchanged files, safe to re-run
-- **Fast** — tree-sitter AST chunking, HNSW index, batch embeddings (100/call)
+- **Fast** — parallel file chunking via rayon, HNSW index, batch embeddings (100/call)
 - **Zero config** — auto-installs PostgreSQL via Homebrew, auto-creates DB and schema
+- **Multi-language** — tree-sitter grammars for TypeScript, JavaScript, Rust, Python, Go + plain chunking for JSON/YAML/TOML/Markdown
+- **Resilient** — exponential backoff retry on OpenAI 429/5xx errors
 - **Agent-friendly** — `--json` and `--files-only` output modes, stale warnings to stderr
 
 ## Install
@@ -76,6 +78,9 @@ scanr index                          # Index current directory
 scanr index --root /path/to/project  # Index a specific project
 scanr index --file src/main.rs       # Re-index a single file
 scanr index --force                  # Force re-embed everything
+scanr index --chunk-size 1500        # Custom chunk size (default: 1000)
+scanr index --chunk-overlap 200      # Custom overlap (default: 100)
+scanr index --gitignore /path/.gitignore  # Custom gitignore file
 ```
 
 ### `scanr search`
@@ -119,19 +124,34 @@ scanr clear
 scanr clear --root /path/to/project
 ```
 
+### `scanr reindex`
+
+Clear all data and re-index from scratch. Equivalent to `scanr clear && scanr index --force`.
+
+```bash
+scanr reindex
+scanr reindex --root /path/to/project
+```
+
 ## Supported File Types
 
 | Type | Extensions |
 |------|-----------|
-| Code | `.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`, `.mjs`, `.cjs` |
-| Docs | `.md`, `.mdx` |
+| JavaScript/TypeScript | `.ts`, `.tsx`, `.js`, `.jsx`, `.mts`, `.cts`, `.mjs`, `.cjs` |
+| Rust | `.rs` |
+| Python | `.py` |
+| Go | `.go` |
+| Markdown | `.md`, `.mdx` |
+| Data | `.json`, `.yaml`, `.yml`, `.toml` |
+
+Code files are chunked using tree-sitter (syntax-aware, respects function/class boundaries). Data and markdown files use plain text splitting.
 
 ## How It Works
 
-1. **File discovery** — `git ls-files --cached --others --exclude-standard` filtered by supported extensions
-2. **Chunking** — tree-sitter AST-based splitting for code (respects function/class boundaries), heading-based splitting for markdown (1000 chars, 100 overlap)
+1. **File discovery** — `git ls-files --cached --others --exclude-standard` filtered by supported extensions, respects `.gitignore`
+2. **Parallel chunking** — rayon-parallelized file reading + tree-sitter AST splitting for code, heading-based splitting for markdown (configurable size/overlap)
 3. **Deduplication** — SHA-256 content hashing skips unchanged files
-4. **Embedding** — OpenAI `text-embedding-3-large` at 3072 dimensions, batched (max 100 per API call)
+4. **Embedding** — OpenAI `text-embedding-3-large` at 3072 dimensions, batched (max 100 per call), with exponential backoff retry on 429/5xx
 5. **Storage** — pgvector with HNSW index for fast cosine similarity search
 6. **Search** — embed query, cosine similarity search, threshold filtering, stale detection
 

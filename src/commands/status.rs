@@ -19,7 +19,7 @@ pub async fn run(root: &str) -> Result<()> {
     let stored = db::get_all_hashes(&pool, &project).await?;
 
     let stored_map: HashMap<String, String> = stored.into_iter().collect();
-    let current_files = git::list_files(root_path)?;
+    let current_files = git::list_files(root_path, None)?;
     let mut stale_files: Vec<String> = Vec::new();
 
     for rel_path in &current_files {
