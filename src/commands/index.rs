@@ -118,7 +118,10 @@ pub async fn run(root: &str, single_file: Option<String>, force: bool) -> Result
     }
 
     let mut stderr = std::io::stderr().lock();
-    writeln!(stderr, "+{added} added  ={skipped} skipped  ~{updated} updated  -{deleted} deleted")?;
+    writeln!(
+        stderr,
+        "\u{2713} +{added} added  ={skipped} skipped  ~{updated} updated  -{deleted} deleted"
+    )?;
 
     pool.close().await;
     Ok(())

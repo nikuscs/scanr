@@ -73,7 +73,7 @@ pub async fn ensure_database() -> Result<()> {
 
     if !exists {
         sqlx::query("CREATE DATABASE code_index").execute(&admin).await?;
-        tracing::info!("Created database code_index");
+        tracing::info!("\u{2713} Created database code_index");
     }
 
     admin.close().await;

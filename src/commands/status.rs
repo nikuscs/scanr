@@ -48,16 +48,16 @@ pub async fn run(root: &str) -> Result<()> {
     writeln!(out, "Files   : {files}")?;
     writeln!(out, "Chunks  : {chunks}")?;
 
-    let stale_suffix = if stale_files.is_empty() { "" } else { " — run `index` to update" };
+    let stale_suffix = if stale_files.is_empty() { "" } else { " \u{26a0} run `index` to update" };
     writeln!(out, "Stale   : {}{stale_suffix}", stale_files.len())?;
 
     if !stale_files.is_empty() && stale_files.len() <= 20 {
         for f in &stale_files {
-            writeln!(out, "  - {f}")?;
+            writeln!(out, "  \u{2022} {f}")?;
         }
     } else if stale_files.len() > 20 {
         for f in &stale_files[..20] {
-            writeln!(out, "  - {f}")?;
+            writeln!(out, "  \u{2022} {f}")?;
         }
         writeln!(out, "  ... and {} more", stale_files.len() - 20)?;
     }

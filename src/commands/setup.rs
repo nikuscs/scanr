@@ -14,7 +14,7 @@ pub async fn run() -> Result<()> {
     pool.close().await;
 
     let mut stderr = std::io::stderr().lock();
-    writeln!(stderr, "Schema ready")?;
+    writeln!(stderr, "\u{2713} Schema ready")?;
     writeln!(stderr, "  Next: run `scanr index` to start indexing")?;
     Ok(())
 }

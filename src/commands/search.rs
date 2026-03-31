@@ -37,8 +37,11 @@ pub async fn run(
         let stale = stale_count(&pool, &project).await.unwrap_or(0);
         if stale > 0 {
             let mut stderr = std::io::stderr().lock();
-            writeln!(stderr, "{stale} file(s) changed since last index — run `index` to update")
-                .ok();
+            writeln!(
+                stderr,
+                "\u{26a0} {stale} file(s) changed since last index — run `index` to update"
+            )
+            .ok();
         }
     }
 
