@@ -1,12 +1,28 @@
 ---
 name: code-index
 description: Semantic codebase search. Index the project into pgvector and search by meaning using OpenAI embeddings. Use when exploring unfamiliar code, finding patterns, locating where a concept is implemented, or before implementing a feature.
+argument-hint: [search query]
+allowed-tools: Bash(scanr *)
 metadata: {"openclaw":{"emoji":"🔍","requires":{"bins":["scanr"]},"install":[{"id":"binary","kind":"custom","command":"# Download from https://github.com/nikuscs/scanr/releases/latest\n# macOS: scanr-macos-arm64.tar.gz\n# Linux x64: scanr-linux-x64.tar.gz\ntar -xzf scanr-*.tar.gz && chmod +x scanr && sudo mv scanr /usr/local/bin/","label":"Download pre-built binary (recommended)"},{"id":"cargo","kind":"cargo","crate":"scanr","bins":["scanr"],"label":"Install via Cargo (requires Rust)"}]}}
 ---
 
 # Code Index Skill
 
 Semantic search over the codebase using OpenAI `text-embedding-3-large` embeddings + pgvector. Outputs ranked results optimized for LLM consumption.
+
+## Current index state
+
+!`scanr status 2>/dev/null || echo "Not indexed — run setup and index first"`
+
+## Quick action
+
+If `$ARGUMENTS` is provided, search immediately:
+
+```bash
+scanr search "$ARGUMENTS" --json --limit 10
+```
+
+If no arguments, check the index state above and decide what to do based on the user's request.
 
 ## Installation
 
@@ -36,7 +52,7 @@ scanr --version
 
 ## Prerequisites
 
-`OPENAI_API_KEY` must be set in the environment.
+`OPENAI_API_KEY` must be set in the environment, `~/.zshrc`, `~/.bashrc`, or a `.env` file in the project (walks up to 6 directories).
 
 ## When to use (trigger phrases)
 
@@ -138,7 +154,7 @@ Phrase queries in terms of what the code *does*, not what you're looking for. Ex
 1. **Use `--json`** for structured output you can parse: `[{file, language, score, content}]`
 2. **Use `--files-only`** for quick orientation before deep-reading files
 3. **Use `--limit 5-10`** to stay within context limits
-4. **Run `scanr status`** to check if the index is stale before searching
+4. **Check the index state** injected above — if stale or not indexed, run `index` first
 5. **After editing files**, re-index the changed file: `scanr index --file <path>`
 6. **Use `-y`** on `setup` to skip interactive prompts
 
@@ -182,5 +198,5 @@ scanr reindex
 
 ## Environment variables
 
-- `OPENAI_API_KEY` — required for embedding
+- `OPENAI_API_KEY` — required for embedding (reads from env, `~/.zshrc`, or closest `.env`)
 - `CODE_INDEX_DATABASE_URL` — override database URL (default: `postgresql://postgres@localhost/code_index`)
