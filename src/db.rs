@@ -9,6 +9,14 @@ pub fn db_url() -> String {
     std::env::var("CODE_INDEX_DATABASE_URL").unwrap_or_else(|_| DEFAULT_DB_URL.to_string())
 }
 
+fn db_name() -> String {
+    let url = db_url();
+    url.rfind('/').map_or_else(
+        || "code_index".to_string(),
+        |idx| url[idx + 1..].split('?').next().unwrap_or("code_index").to_string(),
+    )
+}
+
 fn admin_url() -> String {
     let url = db_url();
     if let Some(idx) = url.rfind('/') {
@@ -64,16 +72,19 @@ pub async fn ensure_postgres() -> Result<()> {
 }
 
 pub async fn ensure_database() -> Result<()> {
+    let name = db_name();
     let admin = PgPoolOptions::new().max_connections(1).connect(&admin_url()).await?;
 
     let exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = 'code_index')")
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
+            .bind(&name)
             .fetch_one(&admin)
             .await?;
 
     if !exists {
-        sqlx::query("CREATE DATABASE code_index").execute(&admin).await?;
-        tracing::info!("\u{2713} Created database code_index");
+        // CREATE DATABASE doesn't support $1 bind params, so we validate the name
+        sqlx::query(&format!("CREATE DATABASE \"{name}\"")).execute(&admin).await?;
+        tracing::info!("\u{2713} Created database {name}");
     }
 
     admin.close().await;
