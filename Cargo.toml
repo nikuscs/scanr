@@ -43,7 +43,7 @@ oxc = { version = "0.116", features = ["semantic", "ast_visit"] }
 ignore = "0.4"
 
 # Hashing
-sha2 = "0.10"
+sha2 = "0.11"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
