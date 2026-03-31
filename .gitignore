@@ -1,0 +1,13 @@
+/target
+.env
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.claude/settings.local.json
+tarpaulin-report.*
+lcov.info
+cobertura.xml
