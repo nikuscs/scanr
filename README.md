@@ -1,10 +1,10 @@
 # scanr
 
 [![CI](https://github.com/nikuscs/scanr/actions/workflows/ci.yml/badge.svg)](https://github.com/nikuscs/scanr/actions/workflows/ci.yml)
-[![Release](https://github.com/nikuscs/scanr/actions/workflows/release.yml/badge.svg)](https://github.com/nikuscs/scanr/releases)
+[![Release](https://img.shields.io/github/v/release/nikuscs/scanr)](https://github.com/nikuscs/scanr/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Fast semantic codebase search via OpenAI embeddings + pgvector.
+**Fast semantic codebase search via OpenAI embeddings + pgvector. Works as a skill for [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Claude.ai](https://claude.ai), [OpenAI Codex](https://openai.com/index/openai-codex/), and any AI agent.**
 
 Walks your git repo, chunks files with tree-sitter (syntax-aware splitting), embeds via `text-embedding-3-large` at 3072 dimensions, and stores in PostgreSQL with pgvector for instant cosine-similarity search.
 
@@ -15,37 +15,29 @@ Walks your git repo, chunks files with tree-sitter (syntax-aware splitting), emb
 - **Semantic search** — find code by meaning, not just keywords
 - **Incremental** — SHA-256 hashing skips unchanged files, safe to re-run
 - **Fast** — parallel file chunking via rayon, HNSW index, batch embeddings (100/call)
-- **Zero config** — auto-installs PostgreSQL via Homebrew, auto-creates DB and schema
+- **Zero config** — auto-installs PostgreSQL + pgvector via Homebrew, auto-creates DB and schema
 - **Multi-language** — tree-sitter grammars for TypeScript, JavaScript, Rust, Python, Go + plain chunking for JSON/YAML/TOML/Markdown
 - **Resilient** — exponential backoff retry on OpenAI 429/5xx errors
-- **Agent-friendly** — `--json` and `--files-only` output modes, stale warnings to stderr
+- **Agent-friendly** — `--json` and `--files-only` output modes, `-y` for non-interactive setup, stale warnings to stderr
 
 ## Install
 
-Download the latest binary from [Releases](https://github.com/nikuscs/scanr/releases):
-
 ```bash
-# macOS (Apple Silicon)
-tar -xzf scanr-macos-arm64.tar.gz
-chmod +x scanr
-sudo mv scanr /usr/local/bin/
+# From source (requires Rust 1.85+)
+cargo install --git https://github.com/nikuscs/scanr
 
-# Linux (x64)
-tar -xzf scanr-linux-x64.tar.gz
-chmod +x scanr
-sudo mv scanr /usr/local/bin/
+# Or clone and build
+git clone https://github.com/nikuscs/scanr
+cd scanr
+cargo build --release
 ```
 
-Or build from source:
-
-```bash
-cargo install --path .
-```
+Pre-built binaries available in [Releases](https://github.com/nikuscs/scanr/releases).
 
 ## Quick Start
 
 ```bash
-# One-time setup (auto-installs PostgreSQL if needed)
+# One-time setup (auto-installs PostgreSQL + pgvector if needed)
 export OPENAI_API_KEY=sk-...
 scanr setup
 
@@ -63,10 +55,12 @@ scanr search "how does authentication work"
 
 Create the database, install pgvector extension, and create all tables + HNSW index. Run once per machine.
 
-On macOS, PostgreSQL is auto-installed and started via Homebrew if not already present.
+On macOS, PostgreSQL and pgvector are auto-installed and started via Homebrew if not already present.
 
 ```bash
-scanr setup
+scanr setup                   # Interactive — prompts for PostgreSQL version
+scanr setup -y                # Non-interactive — accepts defaults (for agents)
+scanr setup --pg-version 17   # Specific PostgreSQL version (default: 18)
 ```
 
 ### `scanr index`
@@ -175,6 +169,53 @@ CODE_INDEX_DATABASE_URL=postgresql://user:pass@host/code_index scanr index
 - **<70%** — loosely related, use as breadcrumbs only
 
 If results are poor, try rephrasing the query in terms of what the code *does*, not what you're *looking for* (e.g., "debit wallet integer amount" not "where is money subtracted").
+
+## AI Agents
+
+If you are an AI agent (Claude Code, Claude.ai, OpenAI Codex, or any tool-calling agent), you can use `scanr` as a skill to semantically search any codebase. Download the binary and call it directly from your tool/shell integration. A `SKILL.md` file is included for Claude Code skill registration.
+
+### Quick setup
+
+```bash
+# Download the pre-compiled binary for your platform from Releases
+# https://github.com/nikuscs/scanr/releases/latest
+
+# One-time setup (non-interactive for agents)
+scanr setup -y
+
+# Index the project
+scanr index
+
+# Search
+scanr search "how does authentication work" --json
+```
+
+### Searching
+
+```bash
+# Semantic search with JSON output (best for agents)
+scanr search "payment processing" --json --limit 5
+
+# Files only (orientation/discovery)
+scanr search "database models" --files-only
+
+# Filter by language
+scanr search "API routes" --lang ts --json
+
+# Check if index is stale
+scanr status
+```
+
+### Tips for agents
+
+- Use `--json` for structured output you can parse: `[{file, language, score, content}]`
+- Use `--files-only` for quick orientation before deep-reading files
+- Use `--limit` to control result count and stay within context limits
+- Run `scanr status` to check if the index is stale before searching
+- If stale files are detected, run `scanr index` before searching
+- After editing files, re-index the changed file: `scanr index --file <path>`
+- Phrase queries in terms of what the code *does*, not what you're looking for
+- Use `-y` flag on `setup` to skip interactive prompts
 
 ## Related Projects
 
