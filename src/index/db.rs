@@ -31,6 +31,7 @@ fn admin_url() -> String {
 }
 
 pub async fn ensure_postgres(pg_version: u32) -> Result<()> {
+    let _ = pg_version; // used only on macOS
     if PgPoolOptions::new().max_connections(1).connect(&admin_url()).await.is_ok() {
         return Ok(());
     }
