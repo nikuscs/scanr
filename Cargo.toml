@@ -1,0 +1,104 @@
+[package]
+name = "scanr"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Fast semantic codebase search via OpenAI embeddings + pgvector"
+license-file = "LICENSE"
+repository = "https://github.com/nikuscs/scanr"
+readme = "README.md"
+keywords = ["search", "embeddings", "pgvector", "semantic", "codebase"]
+categories = ["command-line-utilities"]
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Parallelism
+rayon = "1.10"
+
+# HTTP (OpenAI API)
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres"] }
+pgvector = { version = "0.4", features = ["sqlx"] }
+
+# Tree-sitter
+tree-sitter = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-md = "0.3"
+tree-sitter-rust = "0.24"
+tree-sitter-python = "0.25"
+tree-sitter-go = "0.25"
+
+# JS/TS semantic analysis (scan module)
+oxc = { version = "0.116", features = ["semantic", "ast_visit"] }
+
+# File walking with .gitignore support
+ignore = "0.4"
+
+# Hashing
+sha2 = "0.10"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Progress bars
+indicatif = "0.18"
+
+[dev-dependencies]
+tempfile = "3"
+assert_cmd = "2"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+needless_pass_by_value = "allow"
+future_not_send = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_lossless = "allow"
+format_push_string = "allow"
+return_self_not_must_use = "allow"
+unnecessary_debug_formatting = "allow"
+# Strict denials:
+dbg_macro = "deny"
+todo = "deny"
+unimplemented = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+
+[profile.dev]
+debug = 1
+
+[profile.dev.package."*"]
+opt-level = 1
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

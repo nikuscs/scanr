@@ -1,0 +1,19 @@
+{
+  "name": "scanr",
+  "owner": {
+    "name": "nikuscs"
+  },
+  "metadata": {
+    "description": "Semantic codebase search + structural analysis for AI agents"
+  },
+  "plugins": [
+    {
+      "name": "scanr",
+      "source": "./plugin",
+      "description": "Semantic codebase search via OpenAI embeddings + pgvector, plus compact tree view for project orientation",
+      "version": "0.1.0",
+      "license": "MIT",
+      "keywords": ["search", "embeddings", "semantic", "codebase", "pgvector"]
+    }
+  ]
+}

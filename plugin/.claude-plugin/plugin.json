@@ -1,0 +1,10 @@
+{
+  "name": "scanr",
+  "description": "Semantic codebase search via OpenAI embeddings + pgvector, plus compact tree view for project orientation",
+  "version": "0.1.0",
+  "author": {
+    "name": "nikuscs"
+  },
+  "repository": "https://github.com/nikuscs/scanr",
+  "license": "MIT"
+}
