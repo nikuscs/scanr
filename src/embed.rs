@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
@@ -32,8 +34,8 @@ pub struct EmbedClient {
 
 impl EmbedClient {
     pub fn new() -> Result<Self> {
-        let api_key = std::env::var("OPENAI_API_KEY").context(
-            "OPENAI_API_KEY is not set.\nAdd it to ~/.zshrc:  export OPENAI_API_KEY=sk-...",
+        let api_key = resolve_api_key().context(
+            "OPENAI_API_KEY is not set.\nSet it in ~/.zshrc, ~/.bashrc, or a .env file in your project:\n  export OPENAI_API_KEY=sk-...",
         )?;
 
         let client = reqwest::Client::new();
@@ -161,4 +163,53 @@ const fn is_retryable_status(status: u16) -> bool {
 
 fn is_retryable_error(err: &reqwest::Error) -> bool {
     err.is_timeout() || err.is_connect()
+}
+
+/// Resolve `OPENAI_API_KEY`: check environment first, then walk up from cwd
+/// looking for the closest `.env` file that defines it.
+fn resolve_api_key() -> Option<String> {
+    if let Ok(val) = std::env::var("OPENAI_API_KEY") {
+        if !val.is_empty() {
+            return Some(val);
+        }
+    }
+
+    let mut dir = std::env::current_dir().ok()?;
+    loop {
+        let env_file = dir.join(".env");
+        if let Some(val) = read_key_from_env_file(&env_file) {
+            return Some(val);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+
+    None
+}
+
+fn read_key_from_env_file(path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("OPENAI_API_KEY") {
+            let rest = rest.trim_start();
+            if let Some(val) = rest.strip_prefix('=') {
+                let val = val.trim();
+                // Strip surrounding quotes if present
+                let val = val
+                    .strip_prefix('"')
+                    .and_then(|v| v.strip_suffix('"'))
+                    .or_else(|| val.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+                    .unwrap_or(val);
+                if !val.is_empty() {
+                    return Some(val.to_string());
+                }
+            }
+        }
+    }
+    None
 }
