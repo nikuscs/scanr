@@ -38,15 +38,15 @@ pub async fn ensure_postgres() -> Result<()> {
         use std::process::Command;
         tracing::info!("PostgreSQL not reachable — attempting install via Homebrew...");
 
-        let brew_check = Command::new("brew").args(["list", "postgresql@17"]).output();
+        let brew_check = Command::new("brew").args(["list", "postgresql@18"]).output();
         let already_installed = brew_check.as_ref().is_ok_and(|output| output.status.success());
 
         if already_installed {
             tracing::info!("PostgreSQL is installed but not running, starting...");
         } else {
-            tracing::info!("Installing postgresql@17 via Homebrew...");
+            tracing::info!("Installing postgresql@18 via Homebrew...");
             let status = Command::new("brew")
-                .args(["install", "postgresql@17"])
+                .args(["install", "postgresql@18"])
                 .status()
                 .context("Failed to install PostgreSQL (is Homebrew installed?)")?;
             if !status.success() {
@@ -54,8 +54,21 @@ pub async fn ensure_postgres() -> Result<()> {
             }
         }
 
+        // Ensure pgvector extension is available
+        let pgvector_check = Command::new("brew").args(["list", "pgvector"]).output();
+        if !pgvector_check.as_ref().is_ok_and(|output| output.status.success()) {
+            tracing::info!("Installing pgvector via Homebrew...");
+            let status = Command::new("brew")
+                .args(["install", "pgvector"])
+                .status()
+                .context("Failed to install pgvector")?;
+            if !status.success() {
+                anyhow::bail!("pgvector install failed");
+            }
+        }
+
         Command::new("brew")
-            .args(["services", "start", "postgresql@17"])
+            .args(["services", "start", "postgresql@18"])
             .status()
             .context("Failed to start PostgreSQL")?;
 
