@@ -49,6 +49,29 @@ pub enum Commands {
         json: bool,
     },
 
+    /// Compact project structure overview for fast orientation
+    Tree {
+        /// Project root directory
+        #[arg(long, default_value = ".")]
+        root: String,
+
+        /// Focus on a subdirectory within the project root
+        #[arg(long)]
+        path: Option<String>,
+
+        /// Max branching depth before collapsing subtrees
+        #[arg(long, default_value_t = 6)]
+        depth: usize,
+
+        /// Max files shown per line before wrapping
+        #[arg(long, default_value_t = 6)]
+        inline: usize,
+
+        /// Include test directories and test files
+        #[arg(long)]
+        all: bool,
+    },
+
     /// Show indexing stats and stale file count
     Status {
         /// Project root directory
@@ -65,6 +88,40 @@ pub enum Commands {
 
     /// Clear and re-index the project from scratch
     Reindex(IndexArgs),
+
+    /// Structural scan: extract functions, bindings, and exports from TypeScript/JavaScript files
+    Scan(ScanArgs),
+}
+
+#[derive(clap::Args, Clone)]
+pub struct ScanArgs {
+    /// Project root directory
+    #[arg(long, default_value = ".")]
+    pub root: String,
+
+    /// Output format
+    #[arg(long, default_value = "compact")]
+    pub mode: crate::scan::types::OutputMode,
+
+    /// File extensions to include (comma-separated)
+    #[arg(long, value_delimiter = ',')]
+    pub include: Vec<String>,
+
+    /// Patterns to exclude (comma-separated)
+    #[arg(long, value_delimiter = ',')]
+    pub exclude: Vec<String>,
+
+    /// Max file size in bytes
+    #[arg(long, default_value_t = 1_048_576)]
+    pub max_bytes: u64,
+
+    /// Function kinds to include
+    #[arg(long, default_value = "all")]
+    pub function_kinds: crate::scan::types::FunctionKindsFilter,
+
+    /// Scan a single file instead of directory
+    #[arg(long)]
+    pub file: Option<String>,
 }
 
 #[derive(clap::Args, Clone)]
@@ -103,4 +160,8 @@ pub struct IndexArgs {
     /// Chunk overlap in characters
     #[arg(long, default_value_t = 100)]
     pub chunk_overlap: usize,
+
+    /// Skip files larger than this (bytes). Default: 512 KB.
+    #[arg(long, default_value_t = 524_288)]
+    pub max_bytes: u64,
 }

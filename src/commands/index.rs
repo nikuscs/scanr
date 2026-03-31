@@ -10,7 +10,7 @@ use rayon::prelude::*;
 use sha2::{Digest, Sha256};
 
 use crate::cli::IndexArgs;
-use crate::{chunk, db, embed, git};
+use crate::index::{chunk, db, embed, git};
 
 struct FileChunks {
     rel_path: String,
@@ -19,12 +19,13 @@ struct FileChunks {
     hash: String,
 }
 
+#[allow(clippy::too_many_lines)]
 pub async fn run(args: &IndexArgs) -> Result<()> {
     let project =
         fs::canonicalize(&args.root).context("Cannot resolve project root")?.display().to_string();
     let root_path = PathBuf::from(&project);
 
-    let embedder = embed::EmbedClient::new()?;
+    let embedder = embed::EmbedClient::new(Some(&root_path))?;
     let pool = db::connect().await?;
     let mut stderr = std::io::stderr().lock();
 
@@ -51,6 +52,7 @@ pub async fn run(args: &IndexArgs) -> Result<()> {
     pb.set_style(style);
 
     let skipped = Mutex::new(0u64);
+    let rt_handle = tokio::runtime::Handle::current();
     let file_chunks: Vec<FileChunks> = files
         .par_iter()
         .filter_map(|rel_path| {
@@ -63,6 +65,8 @@ pub async fn run(args: &IndexArgs) -> Result<()> {
                 args.file.is_some(),
                 &chunk_config,
                 &skipped,
+                &rt_handle,
+                args.max_bytes,
             );
             pb.inc(1);
             match result {
@@ -153,8 +157,21 @@ fn process_file(
     is_single: bool,
     chunk_config: &chunk::ChunkConfig,
     skipped: &Mutex<u64>,
+    rt_handle: &tokio::runtime::Handle,
+    max_bytes: u64,
 ) -> Result<Option<FileChunks>> {
     let abs_path = root_path.join(rel_path);
+
+    // Skip files that exceed the size limit
+    if let Ok(meta) = fs::metadata(&abs_path) {
+        if meta.len() > max_bytes {
+            tracing::debug!(path = %abs_path.display(), size = meta.len(), limit = max_bytes, "skipping oversized file");
+            let mut s = skipped.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            *s += 1;
+            return Ok(None);
+        }
+    }
+
     let Ok(content) = fs::read_to_string(&abs_path) else {
         return Ok(None);
     };
@@ -163,8 +180,7 @@ fn process_file(
 
     // Check hash for incremental skip (blocking runtime call from rayon)
     if !force && !is_single {
-        let rt = tokio::runtime::Handle::current();
-        if let Ok(Some(stored)) = rt.block_on(db::get_stored_hash(pool, project, rel_path)) {
+        if let Ok(Some(stored)) = rt_handle.block_on(db::get_stored_hash(pool, project, rel_path)) {
             if stored == hash {
                 let mut s = skipped.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 *s += 1;

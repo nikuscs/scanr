@@ -3,7 +3,7 @@ use std::io::Write;
 
 use anyhow::{Context, Result};
 
-use crate::db;
+use crate::index::db;
 
 pub async fn run(root: &str) -> Result<()> {
     let project =

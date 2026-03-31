@@ -5,7 +5,7 @@ use std::io::Write;
 use anyhow::{Context, Result};
 use sha2::{Digest, Sha256};
 
-use crate::{db, git};
+use crate::index::{db, git};
 
 pub async fn run(root: &str) -> Result<()> {
     let project =

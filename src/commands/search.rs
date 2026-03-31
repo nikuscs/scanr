@@ -4,7 +4,7 @@ use std::io::Write;
 
 use anyhow::{Context, Result};
 
-use crate::{db, embed};
+use crate::index::{db, embed, git};
 
 pub async fn run(
     query: &str,
@@ -21,17 +21,31 @@ pub async fn run(
         );
     }
 
-    let project =
-        fs::canonicalize(root).context("Cannot resolve project root")?.display().to_string();
+    let root_path = std::path::PathBuf::from(
+        fs::canonicalize(root).context("Cannot resolve project root")?.display().to_string(),
+    );
 
-    let embedder = embed::EmbedClient::new()?;
+    let embedder = embed::EmbedClient::new(Some(&root_path))?;
+    let project = root_path.display().to_string();
     let pool = db::connect().await?;
 
     let query_embedding = embedder.embed_single(query).await?;
 
-    let results =
-        db::search_similar(&pool, &project, &query_embedding, limit, threshold, lang.as_deref())
-            .await?;
+    // Map short extension (e.g. "ts") to full language name (e.g. "typescript")
+    let resolved_lang = lang.as_deref().map(|l| {
+        let full = git::lang_for_ext(&format!("_.{l}"));
+        if full.is_empty() { l.to_string() } else { full.to_string() }
+    });
+
+    let results = db::search_similar(
+        &pool,
+        &project,
+        &query_embedding,
+        limit,
+        threshold,
+        resolved_lang.as_deref(),
+    )
+    .await?;
 
     if !as_json {
         let stale = stale_count(&pool, &project).await.unwrap_or(0);
@@ -117,7 +131,7 @@ async fn stale_count(pool: &sqlx::PgPool, project: &str) -> Result<usize> {
 
     let stored_map: HashMap<String, String> = stored.into_iter().collect();
     let root = std::path::Path::new(project);
-    let current_files = crate::git::list_files(root, None)?;
+    let current_files = crate::index::git::list_files(root, None)?;
     let mut stale = 0;
 
     for rel_path in &current_files {

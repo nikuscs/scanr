@@ -3,7 +3,7 @@ use std::io::Write;
 use anyhow::Result;
 
 use crate::cli::SetupArgs;
-use crate::db;
+use crate::index::db;
 
 pub async fn run(args: &SetupArgs) -> Result<()> {
     let pg_version = if args.yes { args.pg_version } else { prompt_pg_version(args.pg_version)? };

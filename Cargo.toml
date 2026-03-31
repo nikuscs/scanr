@@ -36,6 +36,12 @@ tree-sitter-rust = "0.24"
 tree-sitter-python = "0.25"
 tree-sitter-go = "0.25"
 
+# JS/TS semantic analysis (scan module)
+oxc = { version = "0.116", features = ["semantic", "ast_visit"] }
+
+# File walking with .gitignore support
+ignore = "0.4"
+
 # Hashing
 sha2 = "0.10"
 

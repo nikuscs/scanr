@@ -2,12 +2,10 @@ use anyhow::Result;
 use clap::Parser;
 use tracing_subscriber::EnvFilter;
 
-mod chunk;
 mod cli;
 mod commands;
-mod db;
-mod embed;
-mod git;
+mod index;
+mod scan;
 
 use cli::{Cli, Commands};
 
@@ -27,8 +25,12 @@ async fn main() -> Result<()> {
             let q = query.join(" ");
             commands::search::run(&q, &root, limit, threshold, lang, files_only, json).await
         }
+        Commands::Tree { root, path, depth, inline, all } => {
+            commands::tree::run(&root, path.as_deref(), depth, inline, all).await
+        }
         Commands::Status { root } => commands::status::run(&root).await,
         Commands::Clear { root } => commands::clear::run(&root).await,
         Commands::Reindex(args) => commands::reindex::run(&args).await,
+        Commands::Scan(args) => commands::scan::run(&args).await,
     }
 }
