@@ -135,7 +135,7 @@ fn collect_nodes(
         return;
     }
 
-    for i in 0..child_count {
+    for i in 0..child_count as u32 {
         if let Some(child) = node.child(i) {
             collect_nodes(child, source, chunks, current, ext, config);
         }
