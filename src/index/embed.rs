@@ -3,6 +3,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 const OPENAI_EMBED_URL: &str = "https://api.openai.com/v1/embeddings";
 pub const STORAGE_DIMENSIONS: u32 = 2000;
@@ -102,9 +103,29 @@ pub struct EmbedClient {
 impl EmbedClient {
     pub fn new(project_root: Option<&Path>, config: EmbeddingConfig) -> Result<Self> {
         validate_supported_config(&config)?;
-        let api_key = resolve_api_key(project_root).context(
-            "OPENAI_API_KEY is not set.\nSet it in ~/.zshrc, ~/.bashrc, or a .env file in your project:\n  export OPENAI_API_KEY=sk-...",
-        )?;
+
+        let bad_hashes = load_bad_key_hashes();
+        let candidates = resolve_api_keys(project_root);
+
+        let api_key = candidates
+            .into_iter()
+            .find(|(key, source)| {
+                let dominated = bad_hashes.contains(&hash_key(key));
+                if dominated {
+                    tracing::debug!("Skipping cached-invalid key from {source}");
+                }
+                !dominated
+            })
+            .map(|(key, _)| key)
+            .or_else(|| {
+                // All candidates were bad-listed — clear the cache and retry
+                // in case the user rotated a key that was previously invalid.
+                clear_bad_key_cache();
+                resolve_api_keys(project_root).into_iter().next().map(|(k, _)| k)
+            })
+            .context(
+                "OPENAI_API_KEY is not set.\nSet it in ~/.zshrc, ~/.bashrc, or a .env file in your project:\n  export OPENAI_API_KEY=sk-...",
+            )?;
 
         let client = reqwest::Client::new();
         Ok(Self { client, api_key, config })
@@ -174,6 +195,17 @@ impl EmbedClient {
                 continue;
             }
 
+            if status.as_u16() == 401 {
+                let body = resp.text().await.unwrap_or_default();
+                save_bad_key_hash(&self.api_key);
+                anyhow::bail!(
+                    "OpenAI API key is invalid (401 Unauthorized).\n\
+                     The key has been cached as invalid and will be skipped on the next run.\n\
+                     If you have another key in ~/.zshrc or a parent .env, it will be used automatically.\n\
+                     API response: {body}"
+                );
+            }
+
             let body = resp.text().await.unwrap_or_default();
             anyhow::bail!("OpenAI API error {status}: {body}");
         }
@@ -224,6 +256,17 @@ impl EmbedClient {
 
             if attempt < MAX_RETRIES && is_retryable_status(status.as_u16()) {
                 continue;
+            }
+
+            if status.as_u16() == 401 {
+                let body = resp.text().await.unwrap_or_default();
+                save_bad_key_hash(&self.api_key);
+                anyhow::bail!(
+                    "OpenAI API key is invalid (401 Unauthorized).\n\
+                     The key has been cached as invalid and will be skipped on the next run.\n\
+                     If you have another key in ~/.zshrc or a parent .env, it will be used automatically.\n\
+                     API response: {body}"
+                );
             }
 
             let body = resp.text().await.unwrap_or_default();
@@ -300,44 +343,60 @@ fn truncate_chunk(text: &str) -> String {
     text[..end].to_string()
 }
 
-/// Resolve `OPENAI_API_KEY`: check environment first, then walk up from the
-/// project root (if provided) and cwd looking for the closest `.env` file.
-fn resolve_api_key(project_root: Option<&Path>) -> Option<String> {
+/// Collect all `OPENAI_API_KEY` candidates in priority order, each tagged with
+/// a human-readable source label. The caller decides which one to use.
+fn resolve_api_keys(project_root: Option<&Path>) -> Vec<(String, &'static str)> {
+    let mut keys: Vec<(String, &'static str)> = Vec::new();
+
+    // 1. Process environment (highest priority — includes keys from sourced shell profiles)
     if let Ok(val) = std::env::var("OPENAI_API_KEY") {
         if !val.is_empty() {
-            return Some(val);
+            keys.push((val, "environment variable"));
         }
     }
 
-    // Search from project root first (the --root flag target)
+    // 2. Walk .env files from project root
     if let Some(root) = project_root {
-        if let Some(val) = walk_env_files(root) {
-            return Some(val);
-        }
+        walk_env_files_into(root, &mut keys);
     }
 
-    // Fall back to cwd
+    // 3. Walk .env files from cwd
     if let Ok(cwd) = std::env::current_dir() {
-        if let Some(val) = walk_env_files(&cwd) {
-            return Some(val);
+        walk_env_files_into(&cwd, &mut keys);
+    }
+
+    // 4. Shell RC files (fallback for non-login shells / IDE terminals)
+    if let Some(home) = dirs::home_dir() {
+        for (file, label) in [
+            (".zshrc", "~/.zshrc"),
+            (".bashrc", "~/.bashrc"),
+            (".zprofile", "~/.zprofile"),
+            (".bash_profile", "~/.bash_profile"),
+        ] {
+            if let Some(val) = read_key_from_shell_rc(&home.join(file)) {
+                keys.push((val, label));
+            }
         }
     }
 
-    None
+    // Deduplicate by key value, keeping the first (highest-priority) source
+    let mut seen = std::collections::HashSet::new();
+    keys.retain(|(key, _)| seen.insert(key.clone()));
+
+    keys
 }
 
-fn walk_env_files(start: &Path) -> Option<String> {
+fn walk_env_files_into(start: &Path, keys: &mut Vec<(String, &'static str)>) {
     let mut dir = start.to_path_buf();
     for _ in 0..6 {
         let env_file = dir.join(".env");
         if let Some(val) = read_key_from_env_file(&env_file) {
-            return Some(val);
+            keys.push((val, ".env file"));
         }
         if !dir.pop() {
             break;
         }
     }
-    None
 }
 
 pub fn read_key_from_env_file(path: &Path) -> Option<String> {
@@ -364,6 +423,75 @@ pub fn read_key_from_env_file(path: &Path) -> Option<String> {
         }
     }
     None
+}
+
+/// Parse `export OPENAI_API_KEY=...` from shell RC files like ~/.zshrc.
+fn read_key_from_shell_rc(path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // Match `export OPENAI_API_KEY=...`
+        let Some(rest) = line.strip_prefix("export") else { continue };
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix("OPENAI_API_KEY") else { continue };
+        let rest = rest.trim_start();
+        if let Some(val) = rest.strip_prefix('=') {
+            let val = val.trim();
+            let val = val
+                .strip_prefix('"')
+                .and_then(|v| v.strip_suffix('"'))
+                .or_else(|| val.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+                .unwrap_or(val);
+            if !val.is_empty() {
+                return Some(val.to_string());
+            }
+        }
+    }
+    None
+}
+
+// --- Bad-key cache ---
+
+fn bad_key_cache_path() -> Option<std::path::PathBuf> {
+    dirs::data_local_dir().map(|d| d.join("scanr").join("bad_keys"))
+}
+
+fn hash_key(key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(key.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+fn load_bad_key_hashes() -> std::collections::HashSet<String> {
+    let Some(path) = bad_key_cache_path() else {
+        return std::collections::HashSet::new();
+    };
+    let content = std::fs::read_to_string(path).unwrap_or_default();
+    content.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect()
+}
+
+fn save_bad_key_hash(key: &str) {
+    let Some(path) = bad_key_cache_path() else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let hash = hash_key(key);
+    let mut existing = load_bad_key_hashes();
+    if existing.insert(hash) {
+        let content = existing.into_iter().collect::<Vec<_>>().join("\n") + "\n";
+        let _ = std::fs::write(path, content);
+    }
+}
+
+fn clear_bad_key_cache() {
+    if let Some(path) = bad_key_cache_path() {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 #[cfg(test)]
@@ -721,5 +849,85 @@ REDIS_URL=redis://localhost
         let result = truncate_chunk(&text);
         assert!(result.len() <= MAX_CHUNK_CHARS);
         assert!(result.is_char_boundary(result.len()));
+    }
+
+    // --- Tests for shell RC parsing ---
+
+    fn write_file(path: &std::path::Path, content: &str) {
+        let mut f = std::fs::File::create(path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn shell_rc_reads_exported_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".zshrc");
+        write_file(&path, "export OPENAI_API_KEY=sk-from-zshrc\n");
+        assert_eq!(read_key_from_shell_rc(&path), Some("sk-from-zshrc".to_string()));
+    }
+
+    #[test]
+    fn shell_rc_reads_quoted_exported_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".zshrc");
+        write_file(&path, "export OPENAI_API_KEY=\"sk-quoted-zshrc\"\n");
+        assert_eq!(read_key_from_shell_rc(&path), Some("sk-quoted-zshrc".to_string()));
+    }
+
+    #[test]
+    fn shell_rc_skips_non_export_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".zshrc");
+        write_file(
+            &path,
+            "# some config\nPATH=/usr/bin\nexport OPENAI_API_KEY=sk-deep\necho hello\n",
+        );
+        assert_eq!(read_key_from_shell_rc(&path), Some("sk-deep".to_string()));
+    }
+
+    #[test]
+    fn shell_rc_returns_none_without_export() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".zshrc");
+        write_file(&path, "OPENAI_API_KEY=sk-no-export\n");
+        assert_eq!(read_key_from_shell_rc(&path), None);
+    }
+
+    #[test]
+    fn shell_rc_returns_none_for_missing_file() {
+        let path = std::path::PathBuf::from("/tmp/does-not-exist-scanr-test/.zshrc");
+        assert_eq!(read_key_from_shell_rc(&path), None);
+    }
+
+    #[test]
+    fn shell_rc_returns_none_for_empty_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".bashrc");
+        write_file(&path, "export OPENAI_API_KEY=\n");
+        assert_eq!(read_key_from_shell_rc(&path), None);
+    }
+
+    // --- Tests for bad-key cache ---
+
+    #[test]
+    fn hash_key_is_deterministic() {
+        assert_eq!(hash_key("sk-test"), hash_key("sk-test"));
+        assert_ne!(hash_key("sk-test"), hash_key("sk-other"));
+    }
+
+    // --- Tests for resolve_api_keys deduplication ---
+
+    #[test]
+    fn resolve_api_keys_deduplicates_by_value() {
+        // Same key from multiple sources should appear only once
+        let mut keys = vec![
+            ("sk-same".to_string(), "environment variable"),
+            ("sk-same".to_string(), ".env file"),
+            ("sk-other".to_string(), "~/.zshrc"),
+        ];
+        let mut seen = std::collections::HashSet::new();
+        keys.retain(|(key, _)| seen.insert(key.clone()));
+        assert_eq!(keys.len(), 2);
+        assert_eq!(keys[0].1, "environment variable"); // first source wins
     }
 }

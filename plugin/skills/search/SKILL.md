@@ -7,7 +7,7 @@ allowed-tools: Bash, Read
 
 ## Index state
 
-!`scanr status 2>/dev/null || echo "Not indexed — run scanr setup -y && scanr index"`
+!`command -v scanr >/dev/null 2>&1 || { echo "scanr not installed — run: cargo install --git https://github.com/nikuscs/scanr"; exit 0; }; scanr status 2>/dev/null || echo "Not indexed — run scanr setup -y && scanr index"`
 
 `scanr status` shows whether the index is stale and which embedding config the project is using.
 
