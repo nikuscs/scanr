@@ -1,6 +1,6 @@
 # Real-World Test Checklist
 
-Tested against: `igerslike-final/feat/ui-polish` (1020 TS/JS files, 176 folders, monorepo with apps/server + apps/web + packages/*)
+Tested against: `igerslike/feat/ui-polish` (1020 TS/JS files, 176 folders, monorepo with apps/server + apps/web + packages/*)
 
 ## CLI Basics
 
