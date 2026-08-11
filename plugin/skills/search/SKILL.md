@@ -66,7 +66,16 @@ scanr dupes --threshold 0.9 --min-lines 5 --print
 
 **tree**: `--root <path>` `--path <subdir>` `--depth N` `--inline N` `--all` `--functions` `--all-functions` `--low-value-max-lines N` `--duplicate-threshold 0.87`
 
-Markers: `[H]` hoistable, `[C:n]` captures, `[L]` low-value candidate, `[D:n]` similarity group.
+Scanner markers are compact internal notation. **Never show them unexplained in a user-facing answer.** Translate them as follows:
+
+| Scanner marker | User-facing wording |
+| --- | --- |
+| `[H]` | “Can move outside its parent function because it uses no parent variables.” |
+| `[C:n]` | “Uses `n` variables from its parent function.” |
+| `[L]` | “Small trivial-wrapper candidate; review whether the named function adds value.” |
+| `[D:n]` | “Belongs to a similarity group containing `n` functions.” |
+
+Write line counts in full (`8 lines`), never as unexplained shorthand such as `8L`. In tables, use descriptive columns such as **Function**, **Lines**, **Why flagged**, and **Suggested action**. Distinguish findings from recommendations: a short event handler may be intentional and should not automatically be removed.
 
 **scan**: `--root <path>` `--mode compact|verbose|files|folders` `--file <path>` `--include ts,tsx,...` `--exclude <patterns>` `--function-kinds top|top+arrow|top+arrow+class|all` `--rules <rules>` `--include-test-files` `--low-value-max-lines N` `--max-bytes N`
 

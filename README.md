@@ -128,10 +128,12 @@ scanr tree --functions --all-functions
 
 Markers:
 
-- `[H]` — nested function captures nothing and can be hoisted
-- `[C:n]` — captures `n` enclosing function bindings
-- `[L]` — conservative low-value candidate
-- `[D:n]` — function belongs to an `n`-member similarity group at the configured threshold; use `dupes` for pair details
+- `[H]` — the nested function uses no parent variables, so it can move outside its parent
+- `[C:n]` — the function uses `n` variables from its parent and usually needs to remain nested
+- `[L]` — the named function is a small trivial wrapper; review whether the abstraction adds value
+- `[D:n]` — the function belongs to a similarity group containing `n` functions; use `dupes` for pair details
+
+These markers are findings, not automatic refactoring instructions. Short React event handlers may be intentionally colocated even when marked `[L]`.
 
 ## Agent workflow
 
