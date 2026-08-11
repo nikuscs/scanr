@@ -132,7 +132,6 @@ fn collect_files(root: &Path, config: &ScanConfig) -> Result<Vec<PathBuf>> {
         if let Ok(meta) = entry.metadata()
             && meta.len() > config.max_bytes
         {
-            tracing::debug!(path = %path.display(), "skipping oversized file");
             continue;
         }
 

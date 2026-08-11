@@ -3,38 +3,19 @@ name = "scanr"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-description = "Fast semantic codebase search via OpenAI embeddings + pgvector"
+description = "Static analysis and search for TypeScript and JavaScript"
 license-file = "LICENSE"
 repository = "https://github.com/nikuscs/scanr"
 readme = "README.md"
-keywords = ["search", "embeddings", "pgvector", "semantic", "codebase"]
+keywords = ["search", "static-analysis", "typescript", "javascript", "codebase"]
 categories = ["command-line-utilities"]
 
 [dependencies]
 # CLI
 clap = { version = "4", features = ["derive", "env"] }
 
-# Async
-tokio = { version = "1", features = ["full"] }
-
 # Parallelism
 rayon = "1.10"
-
-# HTTP (OpenAI API)
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-
-# Database
-sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres"] }
-pgvector = { version = "0.4", features = ["sqlx"] }
-
-# Tree-sitter
-tree-sitter = "0.26"
-tree-sitter-typescript = "0.23"
-tree-sitter-javascript = "0.23"
-tree-sitter-md = "0.3"
-tree-sitter-rust = "0.24"
-tree-sitter-python = "0.25"
-tree-sitter-go = "0.25"
 
 # JS/TS semantic analysis (scan module)
 oxc = { version = "0.123", features = ["semantic", "ast_visit"] }
@@ -42,26 +23,12 @@ oxc = { version = "0.123", features = ["semantic", "ast_visit"] }
 # File walking with .gitignore support
 ignore = "0.4"
 
-# Hashing
-sha2 = "0.10"
-
-# Platform directories (home dir, data dir)
-dirs = "6"
-
 # Serialization
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # Error handling
 anyhow = "1"
-thiserror = "2"
-
-# Logging
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-
-# Progress bars
-indicatif = "0.18"
 
 [dev-dependencies]
 tempfile = "3"

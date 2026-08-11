@@ -32,8 +32,7 @@ const INCLUDE_EXTS: &[&str] = &[
 const STRIP_EXTS: &[&str] =
     &["cjs", "cts", "go", "java", "js", "jsx", "mjs", "mts", "py", "rs", "ts", "tsx"];
 
-#[allow(clippy::unused_async)]
-pub async fn run(
+pub fn run(
     root: &str,
     subpath: Option<&str>,
     depth: usize,

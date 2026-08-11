@@ -6,8 +6,7 @@ use crate::scan::output;
 use crate::scan::types::{ScanResult, Stats};
 use crate::scan::{self, ScanConfig};
 
-#[allow(clippy::unused_async)]
-pub async fn run(args: &ScanArgs) -> Result<()> {
+pub fn run(args: &ScanArgs) -> Result<()> {
     let root = std::path::Path::new(&args.root);
 
     let result = if let Some(file_path) = &args.file {

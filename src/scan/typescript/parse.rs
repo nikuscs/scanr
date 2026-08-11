@@ -28,7 +28,6 @@ pub fn process_file(path: &Path, root: &Path, filter: FunctionKindsFilter) -> Re
     let parse_errors = parser_ret.errors.len();
 
     if parser_ret.panicked {
-        tracing::warn!(path = %path.display(), "parser panicked");
         return Ok(FileIndex {
             path: rel_path,
             functions: Vec::new(),

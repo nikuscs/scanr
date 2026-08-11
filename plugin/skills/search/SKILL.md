@@ -1,96 +1,67 @@
 ---
 name: search
-description: Semantic codebase search, structural TS/JS analysis, and project tree overview. Search by meaning using OpenAI embeddings + pgvector, extract functions/exports with oxc, or get a compact tree view.
-argument-hint: [search query]
+description: Offline code search, structural TS/JS analysis, duplicate detection, and project tree overview.
+argument-hint: [search pattern]
 allowed-tools: Bash, Read
 ---
-
-## Index state
-
-!`command -v scanr >/dev/null 2>&1 || { echo "scanr not installed — run: cargo install --git https://github.com/nikuscs/scanr"; exit 0; }; scanr status 2>/dev/null || echo "Not indexed — run scanr setup -y && scanr index"`
-
-`scanr status` shows whether the index is stale and which embedding config the project is using.
 
 ## Quick action
 
 If `$ARGUMENTS` is provided, search immediately:
 
 ```bash
-scanr search "$ARGUMENTS" --json --limit 10
+scanr search "$ARGUMENTS" --json
 ```
-
-If no arguments, check the index state above and decide based on the user's request.
 
 ## Commands
 
-### Semantic search (requires setup + index)
+### Content and path search
 
 ```bash
-scanr search "how does auth work" --json --limit 10
-scanr search "payment processing" --files-only        # file paths only
-scanr search "API routes" --lang ts --threshold 0.5    # filter by language
+scanr search "useState" --json
+scanr search "todo" --ignore-case --glob '*.ts' --context 2
+scanr search "components" --path --json
 ```
 
-### Tree overview (no setup needed)
+### Tree overview
 
 ```bash
-scanr tree                        # compact structure
-scanr tree --path src/commands    # focus on subtree
-scanr tree --depth 4              # shallower
+scanr tree
+scanr tree --path src/commands
+scanr tree --depth 4
 ```
 
-### Structural scan — TS/JS only (no setup needed)
+### Structural scan
 
 ```bash
-scanr scan --mode files           # functions grouped by file
-scanr scan --mode folders         # functions grouped by folder
-scanr scan --file src/api.ts      # single file
-scanr scan --mode compact         # flat JSON arrays, smallest output
+scanr scan --mode files
+scanr scan --mode folders
+scanr scan --file src/api.ts
+scanr scan --mode compact
 ```
 
-### Maintenance
+### Similarity detection
 
 ```bash
-scanr index                       # incremental re-index
-scanr index --embedding openai:text-embedding-3-small
-scanr index --file <path>         # re-index one file after editing
-scanr reindex                     # full re-index from scratch
-scanr reindex --embedding openai:text-embedding-3-small
-scanr clear                       # remove all indexed data for this project
-scanr setup -y                    # first-time setup (PostgreSQL + pgvector)
+scanr dupes --root src
+scanr dupes --root src --types
+scanr dupes --threshold 0.9 --min-lines 5 --print
 ```
 
-## How to pick the right command
+## Command selection
 
-- **"find where X is implemented"** / **"how does X work"** → `scanr search` (semantic)
-- **"show me the project structure"** / **"what's in this repo"** → `scanr tree`
-- **"list all functions"** / **"what does this file export"** → `scanr scan`
-- **"find similar patterns"** / **"code that does X"** → `scanr search`
-
-## Agent tips
-
-- Always use `--json` for search — returns `[{file, language, score, content}]`
-- Use `--files-only` for orientation before deep-reading with the Read tool
-- Keep `--limit 5-10` to stay within context
-- If the index state above shows stale files, run `scanr index` before searching
-- Check the embedding line in `scanr status` if you need to verify which provider/model/dimensions the project is using
-- `search` does not take an embedding flag; it always uses the project's stored embedding config
-- After editing files, re-index: `scanr index --file <path>`
-- Phrase queries as what the code *does*: "debit wallet integer amount" not "where is money subtracted"
-- `scan` and `tree` work instantly — no database or API key needed
-- `search` requires `OPENAI_API_KEY` in env, `~/.zshrc`, or a `.env` file (walks up to 6 dirs)
-- `SCANR_EMBEDDING=openai:text-embedding-3-small` can set the default embedding for new indexes
+- Find a literal name or text → `scanr search`
+- Find a file by path → `scanr search --path`
+- Inspect repository shape → `scanr tree`
+- List functions, bindings, exports, captures, or violations → `scanr scan`
+- Find similar functions or types → `scanr dupes`
 
 ## Flag reference
 
-All commands accept `--root <path>` (default: `.`).
+**search**: `--root <path>` `--path` `-i|--ignore-case` `--glob <pattern>` `--max-count N` `--context N` `--json`
 
-**search**: `--limit N` `--threshold 0-1` `--lang <ext>` `--files-only` `--json`
+**tree**: `--root <path>` `--path <subdir>` `--depth N` `--inline N` `--all`
 
-**index**: `--embedding provider:model` `--file <path>` `--force` `--chunk-size N` `--chunk-overlap N` `--gitignore <path>`
+**scan**: `--root <path>` `--mode compact|verbose|files|folders` `--file <path>` `--include ts,tsx,...` `--exclude <patterns>` `--function-kinds top|top+arrow|top+arrow+class|all` `--rules <rules>` `--max-bytes N`
 
-**tree**: `--path <subdir>` `--depth N` `--inline N` `--all`
-
-**scan**: `--mode compact|verbose|files|folders` `--file <path>` `--include ts,tsx,...` `--exclude <dirs>` `--function-kinds top|top+arrow|top+arrow+class|all` `--rules <rules>` `--max-bytes N`
-
-**setup**: `-y` `--pg-version N`
+**dupes**: `--root <path>` `--threshold <0-1>` `--min-lines N` `--types` `--print`

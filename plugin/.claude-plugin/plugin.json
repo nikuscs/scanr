@@ -1,6 +1,6 @@
 {
   "name": "scanr",
-  "description": "Semantic codebase search via OpenAI embeddings + pgvector, plus compact tree view for project orientation",
+  "description": "Offline TypeScript/JavaScript analysis, grep, similarity detection, and project tree views",
   "version": "0.1.0",
   "author": {
     "name": "nikuscs"
