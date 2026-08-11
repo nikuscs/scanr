@@ -2,7 +2,7 @@
 name = "scanr"
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.95"
 description = "Static analysis and search for TypeScript and JavaScript"
 license-file = "LICENSE"
 repository = "https://github.com/nikuscs/scanr"
@@ -18,7 +18,7 @@ clap = { version = "4", features = ["derive", "env"] }
 rayon = "1.10"
 
 # JS/TS semantic analysis (scan module)
-oxc = { version = "0.123", features = ["semantic", "ast_visit"] }
+oxc = { version = "0.144", features = ["semantic", "ast_visit"] }
 
 # File walking and content search
 ignore = "0.4"

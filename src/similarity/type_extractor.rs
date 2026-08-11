@@ -88,10 +88,10 @@ impl TypeExtractor {
         let source_type = SourceType::from_path(&self.file_path).unwrap_or(SourceType::tsx());
         let ret = Parser::new(&allocator, &self.source_text, source_type).parse();
 
-        if !ret.errors.is_empty() {
+        if !ret.diagnostics.is_empty() {
             // Create a more readable error message
             let error_messages: Vec<String> =
-                ret.errors.iter().map(|e| e.message.to_string()).collect();
+                ret.diagnostics.iter().map(|e| e.message.to_string()).collect();
             return Err(format!("Parse errors: {}", error_messages.join(", ")));
         }
 
@@ -114,23 +114,19 @@ impl TypeExtractor {
                         types.push(type_def);
                     }
                 }
-                Statement::ExportNamedDeclaration(export) => {
-                    if let Some(decl) = &export.declaration {
-                        match decl {
-                            oxc::ast::ast::Declaration::TSInterfaceDeclaration(interface) => {
-                                if let Some(type_def) = self.extract_interface(interface) {
-                                    types.push(type_def);
-                                }
-                            }
-                            oxc::ast::ast::Declaration::TSTypeAliasDeclaration(type_alias) => {
-                                if let Some(type_def) = self.extract_type_alias(type_alias) {
-                                    types.push(type_def);
-                                }
-                            }
-                            _ => {}
+                Statement::ExportDeclaration(export) => match &export.declaration {
+                    oxc::ast::ast::Declaration::TSInterfaceDeclaration(interface) => {
+                        if let Some(type_def) = self.extract_interface(interface) {
+                            types.push(type_def);
                         }
                     }
-                }
+                    oxc::ast::ast::Declaration::TSTypeAliasDeclaration(type_alias) => {
+                        if let Some(type_def) = self.extract_type_alias(type_alias) {
+                            types.push(type_def);
+                        }
+                    }
+                    _ => {}
+                },
                 _ => {}
             }
         }
@@ -143,10 +139,10 @@ impl TypeExtractor {
         let source_type = SourceType::from_path(&self.file_path).unwrap_or(SourceType::tsx());
         let ret = Parser::new(&allocator, &self.source_text, source_type).parse();
 
-        if !ret.errors.is_empty() {
+        if !ret.diagnostics.is_empty() {
             // Create a more readable error message
             let error_messages: Vec<String> =
-                ret.errors.iter().map(|e| e.message.to_string()).collect();
+                ret.diagnostics.iter().map(|e| e.message.to_string()).collect();
             return Err(format!("Parse errors: {}", error_messages.join(", ")));
         }
 
@@ -386,8 +382,8 @@ impl TypeExtractor {
         if let Some(heritage_clauses) = extends {
             heritage_clauses
                 .iter()
-                .filter_map(|heritage| match &heritage.expression {
-                    oxc::ast::ast::Expression::Identifier(ident) => {
+                .filter_map(|heritage| match &heritage.type_name {
+                    oxc::ast::ast::TSTypeName::IdentifierReference(ident) => {
                         Some(ident.name.as_str().to_string())
                     }
                     _ => None,

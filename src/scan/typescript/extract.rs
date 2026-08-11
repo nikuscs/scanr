@@ -1,10 +1,10 @@
 use std::collections::{BTreeSet, HashSet};
 
 use oxc::ast::ast::{
-    ArrowFunctionExpression, BindingPattern, Declaration, ExportDefaultDeclaration,
-    ExportDefaultDeclarationKind, ExportNamedDeclaration, Expression, FormalParameters, Function,
-    FunctionType, MethodDefinition, MethodDefinitionKind, ObjectProperty, PropertyKind,
-    VariableDeclarator,
+    ArrowFunctionExpression, BindingPattern, Declaration, ExportDeclaration,
+    ExportDefaultDeclaration, ExportDefaultDeclarationKind, ExportNamedDeclaration, Expression,
+    FormalParameters, Function, FunctionType, MethodDefinition, MethodDefinitionKind,
+    ObjectProperty, PropertyKind, VariableDeclarator,
 };
 use oxc::ast_visit::{self, Visit};
 use oxc::semantic::Semantic;
@@ -114,13 +114,13 @@ impl<'a> Visit<'a> for Collector<'_> {
             self.record_export(&local_name, EXPORT_NAMED);
         }
 
-        // `export function foo() {}` or `export const x = ...` — declaration
-        if let Some(decl) = &it.declaration {
-            self.collect_declaration_names(decl, EXPORT_NAMED);
-        }
-
-        self.in_export = true;
         ast_visit::walk::walk_export_named_declaration(self, it);
+    }
+
+    fn visit_export_declaration(&mut self, it: &ExportDeclaration<'a>) {
+        self.collect_declaration_names(&it.declaration, EXPORT_NAMED);
+        self.in_export = true;
+        ast_visit::walk::walk_export_declaration(self, it);
         self.in_export = false;
     }
 

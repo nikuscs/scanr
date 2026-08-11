@@ -19,7 +19,7 @@ A fast, deterministic static-analysis and search CLI for TypeScript and JavaScri
 cargo install --git https://github.com/nikuscs/scanr
 ```
 
-Or build from source with Rust 1.85+:
+Or build from source with Rust 1.95+:
 
 ```bash
 git clone https://github.com/nikuscs/scanr

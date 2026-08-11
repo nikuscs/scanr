@@ -52,7 +52,7 @@ fn process_file_inner(
     let allocator = Allocator::default();
     let parser_ret =
         Parser::new(&allocator, &source, source_type).with_options(ParseOptions::default()).parse();
-    let parse_errors = parser_ret.errors.len();
+    let parse_errors = parser_ret.diagnostics.len();
 
     if parser_ret.panicked {
         let index = FileIndex {
@@ -73,7 +73,8 @@ fn process_file_inner(
         return Ok((index, similarity));
     }
 
-    let semantic = SemanticBuilder::new().build(&parser_ret.program).semantic;
+    let semantic =
+        SemanticBuilder::new().with_build_nodes(true).build(&parser_ret.program).semantic;
     let result = extract::extract_file(&parser_ret.program, &semantic, &source, filter);
     let similarity = include_similarity.then(|| {
         let type_extractor = TypeExtractor::new(source.clone(), rel_path.clone());

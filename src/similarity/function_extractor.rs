@@ -81,10 +81,10 @@ pub fn extract_functions(
     let source_type = SourceType::from_path(filename).unwrap_or(SourceType::tsx());
     let ret = Parser::new(&allocator, source_text, source_type).parse();
 
-    if !ret.errors.is_empty() {
+    if !ret.diagnostics.is_empty() {
         // Create a more readable error message
         let error_messages: Vec<String> =
-            ret.errors.iter().map(|e| e.message.to_string()).collect();
+            ret.diagnostics.iter().map(|e| e.message.to_string()).collect();
         return Err(format!("Parse errors: {}", error_messages.join(", ")));
     }
 
@@ -232,20 +232,18 @@ fn extract_from_statement(stmt: &Statement, ctx: &mut ExtractionContext) {
                         });
 
                         // Extract nested functions within arrow function body
-                        if !arrow.expression {
+                        if let ArrowFunctionBody::FunctionBody(body) = &arrow.body {
                             let saved_parent = ctx.parent_function.clone();
                             ctx.parent_function = Some(arrow_name);
-                            extract_from_function_body(&arrow.body, ctx);
+                            extract_from_function_body(body, ctx);
                             ctx.parent_function = saved_parent;
                         }
                     }
                 }
             }
         }
-        Statement::ExportNamedDeclaration(export) => {
-            if let Some(decl) = &export.declaration {
-                extract_from_declaration(decl, ctx);
-            }
+        Statement::ExportDeclaration(export) => {
+            extract_from_declaration(&export.declaration, ctx);
         }
         Statement::ExportDefaultDeclaration(export) => {
             if let ExportDefaultDeclarationKind::FunctionDeclaration(func) = &export.declaration {
@@ -397,10 +395,10 @@ fn extract_from_declaration(decl: &Declaration, ctx: &mut ExtractionContext) {
                         });
 
                         // Extract nested functions within arrow function body
-                        if !arrow.expression {
+                        if let ArrowFunctionBody::FunctionBody(body) = &arrow.body {
                             let saved_parent = ctx.parent_function.clone();
                             ctx.parent_function = Some(arrow_name);
-                            extract_from_function_body(&arrow.body, ctx);
+                            extract_from_function_body(body, ctx);
                             ctx.parent_function = saved_parent;
                         }
                     }

@@ -37,7 +37,7 @@ fn covers_exports_classes_object_methods_and_bindings() {
         ";
     let st = SourceType::ts().with_module(true);
     let ret = Parser::new(&allocator, src, st).with_options(ParseOptions::default()).parse();
-    let semantic = SemanticBuilder::new().build(&ret.program).semantic;
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(&ret.program).semantic;
     let lines = LineIndex::new(src);
     let result = extract_file(&ret.program, &semantic, src, FunctionKindsFilter::All);
 
@@ -79,7 +79,7 @@ fn filter_and_misc_ast_branches_are_covered() {
     ";
     let st = SourceType::ts().with_module(true);
     let ret = Parser::new(&allocator, src, st).with_options(ParseOptions::default()).parse();
-    let semantic = SemanticBuilder::new().build(&ret.program).semantic;
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(&ret.program).semantic;
 
     let top_only = extract_file(&ret.program, &semantic, src, FunctionKindsFilter::Top);
     assert!(!top_only.functions.iter().any(|f| f.name.as_deref() == Some("ignored")));
@@ -103,7 +103,7 @@ fn nested_functions_record_parents_and_enclosing_captures() {
     ";
     let st = SourceType::ts().with_module(true);
     let ret = Parser::new(&allocator, src, st).with_options(ParseOptions::default()).parse();
-    let semantic = SemanticBuilder::new().build(&ret.program).semantic;
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(&ret.program).semantic;
     let result = extract_file(&ret.program, &semantic, src, FunctionKindsFilter::All);
 
     let hoistable = result
@@ -135,7 +135,7 @@ fn default_export_misc_and_assignment_pattern_fallback() {
     ";
     let st = SourceType::ts().with_module(true);
     let ret = Parser::new(&allocator, src, st).with_options(ParseOptions::default()).parse();
-    let semantic = SemanticBuilder::new().build(&ret.program).semantic;
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(&ret.program).semantic;
     let result = extract_file(&ret.program, &semantic, src, FunctionKindsFilter::All);
 
     let export_names: std::collections::BTreeSet<_> =

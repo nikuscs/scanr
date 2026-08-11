@@ -1,8 +1,8 @@
 use oxc::allocator::Allocator;
 use oxc::ast::ast::{
-    BindingPattern, BlockStatement, Class, ClassElement, Declaration, ExportDefaultDeclarationKind,
-    Expression, FormalParameter, Function, FunctionBody, Program, PropertyKey, Statement,
-    VariableDeclaration, VariableDeclarator,
+    ArrowFunctionBody, BindingPattern, BlockStatement, Class, ClassElement, Declaration,
+    ExportDefaultDeclarationKind, Expression, FormalParameter, Function, FunctionBody, Program,
+    PropertyKey, Statement, VariableDeclaration, VariableDeclarator,
 };
 use oxc::parser::Parser;
 use oxc::span::SourceType;
@@ -23,10 +23,10 @@ pub fn parse_and_convert_to_tree(
     let source_type = SourceType::from_path(filename).unwrap_or(SourceType::tsx());
     let ret = Parser::new(&allocator, source_text, source_type).parse();
 
-    if !ret.errors.is_empty() {
+    if !ret.diagnostics.is_empty() {
         // Create a more readable error message
         let error_messages: Vec<String> =
-            ret.errors.iter().map(|e| e.message.to_string()).collect();
+            ret.diagnostics.iter().map(|e| e.message.to_string()).collect();
         return Err(format!("Parse errors: {}", error_messages.join(", ")));
     }
 
@@ -62,18 +62,17 @@ fn statement_to_tree_node(stmt: &Statement, id_counter: &mut usize) -> Option<Rc
             expression_to_tree_node(&expr_stmt.expression, id_counter)
         }
         Statement::BlockStatement(block) => block_statement_to_tree_node(block, id_counter),
-        Statement::ExportNamedDeclaration(export) => {
-            if let Some(decl) = &export.declaration {
-                declaration_to_tree_node(decl, id_counter)
-            } else {
-                let node = TreeNode::new(
-                    "ExportNamedDeclaration".to_string(),
-                    "ExportNamedDeclaration".to_string(),
-                    *id_counter,
-                );
-                *id_counter += 1;
-                Some(Rc::new(node))
-            }
+        Statement::ExportDeclaration(export) => {
+            declaration_to_tree_node(&export.declaration, id_counter)
+        }
+        Statement::ExportNamedDeclaration(_) => {
+            let node = TreeNode::new(
+                "ExportNamedDeclaration".to_string(),
+                "ExportNamedDeclaration".to_string(),
+                *id_counter,
+            );
+            *id_counter += 1;
+            Some(Rc::new(node))
         }
         Statement::ExportDefaultDeclaration(export) => {
             export_default_declaration_to_tree_node(&export.declaration, id_counter)
@@ -317,22 +316,14 @@ fn expression_to_tree_node(expr: &Expression, id_counter: &mut usize) -> Option<
             }
 
             // Add body
-            if arrow.expression {
-                // Expression body (e.g., => x + 1)
-                if let Some(Statement::ExpressionStatement(expr_stmt)) =
-                    arrow.body.statements.first()
-                {
-                    if let Some(expr_node) =
-                        expression_to_tree_node(&expr_stmt.expression, id_counter)
-                    {
-                        node.add_child(expr_node);
-                    }
-                }
-            } else {
-                // Block body (e.g., => { return x + 1; })
-                if let Some(body_node) = function_body_to_tree_node(&arrow.body, id_counter) {
+            if let ArrowFunctionBody::FunctionBody(body) = &arrow.body {
+                if let Some(body_node) = function_body_to_tree_node(body, id_counter) {
                     node.add_child(body_node);
                 }
+            } else if let Some(expression) = arrow.body.as_expression()
+                && let Some(expr_node) = expression_to_tree_node(expression, id_counter)
+            {
+                node.add_child(expr_node);
             }
 
             Some(Rc::new(node))

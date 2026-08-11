@@ -27,10 +27,10 @@ impl AstFingerprint {
         let source_type = SourceType::tsx(); // Default to TSX for maximum compatibility
         let ret = Parser::new(&allocator, source, source_type).parse();
 
-        if !ret.errors.is_empty() {
+        if !ret.diagnostics.is_empty() {
             // Create a more readable error message
             let error_messages: Vec<String> =
-                ret.errors.iter().map(|e| e.message.to_string()).collect();
+                ret.diagnostics.iter().map(|e| e.message.to_string()).collect();
             return Err(format!("Parse errors: {}", error_messages.join(", ")));
         }
 
@@ -196,8 +196,11 @@ impl AstFingerprint {
                 for param in &arrow_func.params.items {
                     self.visit_formal_parameter(param);
                 }
-                // Arrow function body is not optional
-                self.visit_function_body(&arrow_func.body);
+                if let oxc::ast::ast::ArrowFunctionBody::FunctionBody(body) = &arrow_func.body {
+                    self.visit_function_body(body);
+                } else if let Some(expression) = arrow_func.body.as_expression() {
+                    self.visit_expression(expression);
+                }
             }
             Expression::ConditionalExpression(cond_expr) => {
                 self.count_node("ConditionalExpression");

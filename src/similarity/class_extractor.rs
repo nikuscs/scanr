@@ -267,8 +267,8 @@ impl ClassExtractor {
         let start_line = self.get_line_number(class.span.start as usize);
         let end_line = self.get_line_number(class.span.end as usize);
 
-        let extends = class.super_class.as_ref().and_then(|super_class| {
-            if let oxc::ast::ast::Expression::Identifier(ident) = super_class {
+        let extends = class.heritage.as_ref().and_then(|heritage| {
+            if let oxc::ast::ast::Expression::Identifier(ident) = &heritage.expression {
                 Some(ident.name.as_str().to_string())
             } else {
                 None
@@ -404,9 +404,9 @@ impl ClassExtractor {
         let source_type = SourceType::from_path(&self.file_path).unwrap_or(SourceType::tsx());
         let ret = Parser::new(&allocator, &self.source_text, source_type).parse();
 
-        if !ret.errors.is_empty() {
+        if !ret.diagnostics.is_empty() {
             let error_messages: Vec<String> =
-                ret.errors.iter().map(|e| format!("{:?}", e)).collect();
+                ret.diagnostics.iter().map(|e| format!("{:?}", e)).collect();
             return Err(format!("Parse errors: {}", error_messages.join(", ")));
         }
 
@@ -422,9 +422,8 @@ impl ClassExtractor {
                         classes.push(self.extract_class(class));
                     }
                 }
-                Statement::ExportNamedDeclaration(export) => {
-                    if let Some(oxc::ast::ast::Declaration::ClassDeclaration(class)) =
-                        &export.declaration
+                Statement::ExportDeclaration(export) => {
+                    if let oxc::ast::ast::Declaration::ClassDeclaration(class) = &export.declaration
                     {
                         classes.push(self.extract_class(class));
                     }
