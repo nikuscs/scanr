@@ -84,6 +84,8 @@ impl BindingKind {
 #[serde(rename_all = "camelCase")]
 pub struct FunctionInfo {
     pub name: Option<String>,
+    pub parent: Option<String>,
+    pub captures: Vec<String>,
     pub kind: FunctionKind,
     pub exported: bool,
     pub is_async: bool,

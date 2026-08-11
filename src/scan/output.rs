@@ -30,12 +30,14 @@ pub fn write_result<W: Write>(
     Ok(())
 }
 
+type CompactFunction = (String, u32, u32, String, u8, String, Option<String>, Vec<String>);
+
 #[derive(Serialize)]
 struct CompactOutput {
     ver: u8,
     stats: Stats,
-    /// Functions: [file, line, col, name, exported(0/1), kind]
-    f: Vec<(String, u32, u32, String, u8, String)>,
+    /// Functions: [file, line, col, name, exported(0/1), kind, parent, captures]
+    f: Vec<CompactFunction>,
     /// Bindings: [file, line, col, name, kind, refs]
     b: Vec<(String, u32, u32, String, String, usize)>,
     /// Exports: `[file, name, kind_code]`
@@ -67,6 +69,8 @@ impl From<&ScanResult> for CompactOutput {
                     func.name.clone().unwrap_or_default(),
                     u8::from(func.exported),
                     func.kind.code().to_string(),
+                    func.parent.clone(),
+                    func.captures.clone(),
                 ));
             }
             for binding in &fi.bindings {
@@ -116,6 +120,8 @@ struct VerboseOutput {
 struct VerboseFunction {
     file: String,
     name: Option<String>,
+    parent: Option<String>,
+    captures: Vec<String>,
     kind: String,
     exported: bool,
     is_async: bool,
@@ -178,6 +184,8 @@ impl From<&ScanResult> for VerboseOutput {
                 functions.push(VerboseFunction {
                     file: fi.path.clone(),
                     name: func.name.clone(),
+                    parent: func.parent.clone(),
+                    captures: func.captures.clone(),
                     kind: func.kind.label().to_string(),
                     exported: func.exported,
                     is_async: func.is_async,
@@ -289,46 +297,17 @@ impl From<&ScanResult> for FoldersOutput {
 }
 
 fn compute_dot_names(funcs: &[FunctionInfo]) -> Vec<String> {
-    struct Named<'a> {
-        name: &'a str,
-        start: u32,
-        end: u32,
-    }
-    let named: Vec<Named> = funcs
+    let mut out: Vec<String> = funcs
         .iter()
-        .filter_map(|f| {
-            f.name.as_deref().map(|n| Named { name: n, start: f.line, end: f.line_end })
+        .filter_map(|function| {
+            function.name.as_ref().map(|name| {
+                function
+                    .parent
+                    .as_ref()
+                    .map_or_else(|| name.clone(), |parent| format!("{parent}.{name}"))
+            })
         })
         .collect();
-
-    let mut out: Vec<String> = Vec::with_capacity(named.len());
-    for (i, child) in named.iter().enumerate() {
-        let mut parent_name: Option<&str> = None;
-        let mut parent_span: Option<(u32, u32)> = None;
-        for (j, cand) in named.iter().enumerate() {
-            if i == j {
-                continue;
-            }
-            if cand.start <= child.start && cand.end >= child.end {
-                if let Some((ps, pe)) = parent_span {
-                    let cur_len = pe.saturating_sub(ps);
-                    let new_len = cand.end.saturating_sub(cand.start);
-                    if new_len < cur_len {
-                        parent_span = Some((cand.start, cand.end));
-                        parent_name = Some(cand.name);
-                    }
-                } else {
-                    parent_span = Some((cand.start, cand.end));
-                    parent_name = Some(cand.name);
-                }
-            }
-        }
-        if let Some(p) = parent_name {
-            out.push(format!("{}.{}", p, child.name));
-        } else {
-            out.push(child.name.to_string());
-        }
-    }
     out.sort();
     out.dedup();
     out

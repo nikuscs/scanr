@@ -91,6 +91,39 @@ fn filter_and_misc_ast_branches_are_covered() {
 }
 
 #[test]
+fn nested_functions_record_parents_and_enclosing_captures() {
+    let allocator = Allocator::default();
+    let src = r"
+        const moduleValue = 1;
+        function Component() {
+            const local = 2;
+            function hoistable() { return moduleValue; }
+            const captured = () => local + moduleValue;
+        }
+    ";
+    let st = SourceType::ts().with_module(true);
+    let ret = Parser::new(&allocator, src, st).with_options(ParseOptions::default()).parse();
+    let semantic = SemanticBuilder::new().build(&ret.program).semantic;
+    let result = extract_file(&ret.program, &semantic, src, FunctionKindsFilter::All);
+
+    let hoistable = result
+        .functions
+        .iter()
+        .find(|function| function.name.as_deref() == Some("hoistable"))
+        .unwrap();
+    assert_eq!(hoistable.parent.as_deref(), Some("Component"));
+    assert!(hoistable.captures.is_empty());
+
+    let captured = result
+        .functions
+        .iter()
+        .find(|function| function.name.as_deref() == Some("captured"))
+        .unwrap();
+    assert_eq!(captured.parent.as_deref(), Some("Component"));
+    assert_eq!(captured.captures, vec!["local"]);
+}
+
+#[test]
 fn default_export_misc_and_assignment_pattern_fallback() {
     let allocator = Allocator::default();
     let src = r"

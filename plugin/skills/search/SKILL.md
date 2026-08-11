@@ -62,6 +62,6 @@ scanr dupes --threshold 0.9 --min-lines 5 --print
 
 **tree**: `--root <path>` `--path <subdir>` `--depth N` `--inline N` `--all`
 
-**scan**: `--root <path>` `--mode compact|verbose|files|folders` `--file <path>` `--include ts,tsx,...` `--exclude <patterns>` `--function-kinds top|top+arrow|top+arrow+class|all` `--rules <rules>` `--max-bytes N`
+**scan**: `--root <path>` `--mode compact|verbose|files|folders` `--file <path>` `--include ts,tsx,...` `--exclude <patterns>` `--function-kinds top|top+arrow|top+arrow+class|all` `--rules <rules>` `--include-test-files` `--max-bytes N`
 
 **dupes**: `--root <path>` `--threshold <0-1>` `--min-lines N` `--types` `--print`

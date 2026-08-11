@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::scan::types::{BindingKind, FileIndex, Violation};
+use crate::scan::types::{BindingKind, FileIndex, FunctionKind, Violation};
 
 pub trait Rule: Send + Sync {
     fn name(&self) -> &'static str;
@@ -12,14 +12,28 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(NoUnusedBindings),
         Box::new(OneExportedFunctionPerFile { path_prefix: None }),
         Box::new(MaxFunctionsPerFile { max: 20 }),
+        Box::new(HoistableNestedFunction { include_test_files: false }),
     ]
 }
 
 pub fn run_rules(enabled: &[String], index: &mut FileIndex) {
+    run_rules_with_test_files(enabled, index, false);
+}
+
+pub fn run_rules_with_test_files(
+    enabled: &[String],
+    index: &mut FileIndex,
+    include_test_files: bool,
+) {
     let enabled_set: HashSet<&str> = enabled.iter().map(String::as_str).collect();
+    let mut rules = all_rules();
+    if include_test_files {
+        rules.pop();
+        rules.push(Box::new(HoistableNestedFunction { include_test_files: true }));
+    }
 
     for rule in
-        all_rules().into_iter().filter(|r| enabled_set.is_empty() || enabled_set.contains(r.name()))
+        rules.into_iter().filter(|r| enabled_set.is_empty() || enabled_set.contains(r.name()))
     {
         if let Some(violation) = rule.check(index) {
             index.violations.push(violation);
@@ -81,6 +95,63 @@ impl Rule for OneExportedFunctionPerFile {
             details: exported_fns,
         })
     }
+}
+
+struct HoistableNestedFunction {
+    include_test_files: bool,
+}
+
+impl Rule for HoistableNestedFunction {
+    fn name(&self) -> &'static str {
+        "hoistable_nested_function"
+    }
+
+    fn check(&self, index: &FileIndex) -> Option<Violation> {
+        if !self.include_test_files && is_test_path(&index.path) {
+            return None;
+        }
+
+        let functions: Vec<String> = index
+            .functions
+            .iter()
+            .filter(|function| function.parent.is_some() && function.captures.is_empty())
+            .filter(|function| {
+                matches!(
+                    function.kind,
+                    FunctionKind::Declaration | FunctionKind::Arrow | FunctionKind::Expression
+                )
+            })
+            .filter_map(|function| {
+                function.name.as_ref().map(|name| {
+                    function
+                        .parent
+                        .as_ref()
+                        .map_or_else(|| name.clone(), |parent| format!("{parent}.{name}"))
+                })
+            })
+            .collect();
+
+        if functions.is_empty() {
+            return None;
+        }
+
+        Some(Violation {
+            rule: self.name().to_string(),
+            count: functions.len(),
+            details: functions,
+        })
+    }
+}
+
+fn is_test_path(path: &str) -> bool {
+    let normalized = path.replace('\\', "/").to_ascii_lowercase();
+    normalized.split('/').any(|part| matches!(part, "test" | "tests" | "__tests__"))
+        || normalized.contains(".test.")
+        || normalized.contains(".spec.")
+        || normalized.ends_with("_test.ts")
+        || normalized.ends_with("_test.tsx")
+        || normalized.ends_with("_test.js")
+        || normalized.ends_with("_test.jsx")
 }
 
 struct MaxFunctionsPerFile {

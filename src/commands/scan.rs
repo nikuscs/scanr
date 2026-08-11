@@ -39,7 +39,11 @@ pub fn run(args: &ScanArgs) -> Result<()> {
     };
 
     for index in &mut result.file_indices {
-        crate::scan::rules::run_rules(&args.rules, index);
+        if args.include_test_files {
+            crate::scan::rules::run_rules_with_test_files(&args.rules, index, true);
+        } else {
+            crate::scan::rules::run_rules(&args.rules, index);
+        }
     }
 
     let stdout = std::io::stdout();

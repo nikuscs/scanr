@@ -6,6 +6,8 @@ fn mk_fi(path: &str, fn_names: &[&str], binding_unused: bool) -> FileIndex {
         .iter()
         .map(|n| FunctionInfo {
             name: Some((*n).into()),
+            parent: None,
+            captures: Vec::new(),
             kind: FunctionKind::Declaration,
             exported: true,
             is_async: false,
@@ -91,6 +93,30 @@ fn no_unused_bindings_ignores_imports_and_prefixed_names() {
     ];
     run_rules(&["no_unused_bindings".into()], &mut fi);
     assert!(fi.violations.is_empty());
+}
+
+#[test]
+fn hoistable_nested_function_requires_no_captures() {
+    let mut fi = mk_fi("src/component.tsx", &["Component", "hoistable", "captured"], false);
+    fi.functions[1].parent = Some("Component".into());
+    fi.functions[2].parent = Some("Component".into());
+    fi.functions[2].captures = vec!["local".into()];
+
+    run_rules(&["hoistable_nested_function".into()], &mut fi);
+    let violation = fi.violations.first().unwrap();
+    assert_eq!(violation.count, 1);
+    assert_eq!(violation.details, vec!["Component.hoistable"]);
+}
+
+#[test]
+fn hoistable_nested_function_skips_tests_unless_enabled() {
+    let mut skipped = mk_fi("src/component.test.tsx", &["test", "helper"], false);
+    skipped.functions[1].parent = Some("test".into());
+    run_rules(&["hoistable_nested_function".into()], &mut skipped);
+    assert!(skipped.violations.is_empty());
+
+    run_rules_with_test_files(&["hoistable_nested_function".into()], &mut skipped, true);
+    assert_eq!(skipped.violations[0].details, vec!["test.helper"]);
 }
 
 #[test]

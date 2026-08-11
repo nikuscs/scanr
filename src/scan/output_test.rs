@@ -10,6 +10,8 @@ fn scan_result_example() -> ScanResult {
         functions: vec![
             FunctionInfo {
                 name: Some("foo".into()),
+                parent: None,
+                captures: Vec::new(),
                 kind: FunctionKind::Declaration,
                 exported: true,
                 is_async: false,
@@ -20,6 +22,8 @@ fn scan_result_example() -> ScanResult {
             },
             FunctionInfo {
                 name: None,
+                parent: None,
+                captures: Vec::new(),
                 kind: FunctionKind::Arrow,
                 exported: false,
                 is_async: false,
@@ -30,6 +34,8 @@ fn scan_result_example() -> ScanResult {
             },
             FunctionInfo {
                 name: Some("foo".into()),
+                parent: None,
+                captures: Vec::new(),
                 kind: FunctionKind::Declaration,
                 exported: true,
                 is_async: false,
@@ -55,6 +61,8 @@ fn scan_result_example() -> ScanResult {
         path: "b.ts".to_string(),
         functions: vec![FunctionInfo {
             name: Some("bar".into()),
+            parent: None,
+            captures: Vec::new(),
             kind: FunctionKind::Declaration,
             exported: false,
             is_async: false,
@@ -109,6 +117,8 @@ fn folders_mode_uses_dot_names() {
         functions: vec![
             FunctionInfo {
                 name: Some("builder".into()),
+                parent: None,
+                captures: Vec::new(),
                 kind: FunctionKind::Declaration,
                 exported: false,
                 is_async: false,
@@ -119,6 +129,8 @@ fn folders_mode_uses_dot_names() {
             },
             FunctionInfo {
                 name: Some("get".into()),
+                parent: Some("builder".into()),
+                captures: Vec::new(),
                 kind: FunctionKind::ObjectMethod,
                 exported: false,
                 is_async: false,
@@ -153,6 +165,8 @@ fn dot_names_for_nested_methods() {
         functions: vec![
             FunctionInfo {
                 name: Some("builder".into()),
+                parent: None,
+                captures: Vec::new(),
                 kind: FunctionKind::Declaration,
                 exported: false,
                 is_async: false,
@@ -163,6 +177,8 @@ fn dot_names_for_nested_methods() {
             },
             FunctionInfo {
                 name: Some("get".into()),
+                parent: Some("builder".into()),
+                captures: Vec::new(),
                 kind: FunctionKind::ObjectMethod,
                 exported: false,
                 is_async: false,
@@ -173,6 +189,8 @@ fn dot_names_for_nested_methods() {
             },
             FunctionInfo {
                 name: Some("util".into()),
+                parent: None,
+                captures: Vec::new(),
                 kind: FunctionKind::Declaration,
                 exported: false,
                 is_async: false,
@@ -208,6 +226,8 @@ fn dot_names_picks_nearest_parent() {
         functions: vec![
             FunctionInfo {
                 name: Some("outer".into()),
+                parent: None,
+                captures: Vec::new(),
                 kind: FunctionKind::Declaration,
                 exported: false,
                 is_async: false,
@@ -218,6 +238,8 @@ fn dot_names_picks_nearest_parent() {
             },
             FunctionInfo {
                 name: Some("inner".into()),
+                parent: Some("outer".into()),
+                captures: Vec::new(),
                 kind: FunctionKind::Declaration,
                 exported: false,
                 is_async: false,
@@ -228,6 +250,8 @@ fn dot_names_picks_nearest_parent() {
             },
             FunctionInfo {
                 name: Some("leaf".into()),
+                parent: Some("outer.inner".into()),
+                captures: Vec::new(),
                 kind: FunctionKind::Declaration,
                 exported: false,
                 is_async: false,
@@ -252,7 +276,7 @@ fn dot_names_picks_nearest_parent() {
     .files
     .remove("x.ts")
     .unwrap();
-    assert!(names.contains(&"inner.leaf".to_string()));
+    assert!(names.contains(&"outer.inner.leaf".to_string()));
     assert!(!names.contains(&"outer.leaf".to_string()));
 }
 
@@ -263,6 +287,8 @@ fn write_result_emits_valid_json_all_modes() {
         functions: vec![
             FunctionInfo {
                 name: Some("parent".into()),
+                parent: None,
+                captures: Vec::new(),
                 kind: FunctionKind::Declaration,
                 exported: true,
                 is_async: false,
@@ -273,6 +299,8 @@ fn write_result_emits_valid_json_all_modes() {
             },
             FunctionInfo {
                 name: Some("child".into()),
+                parent: Some("parent".into()),
+                captures: Vec::new(),
                 kind: FunctionKind::ObjectMethod,
                 exported: false,
                 is_async: false,
@@ -335,6 +363,8 @@ fn verbose_output_includes_exports_and_folder_none_parent_path() {
         path: String::new(),
         functions: vec![FunctionInfo {
             name: Some("top".into()),
+            parent: None,
+            captures: Vec::new(),
             kind: FunctionKind::Declaration,
             exported: true,
             is_async: false,

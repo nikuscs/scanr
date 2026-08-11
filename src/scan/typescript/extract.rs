@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 
 use oxc::ast::ast::{
     ArrowFunctionExpression, BindingPattern, Declaration, ExportDefaultDeclaration,
@@ -8,7 +8,7 @@ use oxc::ast::ast::{
 };
 use oxc::ast_visit::{self, Visit};
 use oxc::semantic::Semantic;
-use oxc::syntax::scope::ScopeFlags;
+use oxc::syntax::scope::{ScopeFlags, ScopeId};
 use oxc::syntax::symbol::SymbolFlags;
 
 use crate::scan::types::{
@@ -43,12 +43,19 @@ pub fn extract_file(
     collector.visit_program(program);
 
     let bindings = extract_bindings(semantic, &lines, &collector.exported_names);
+    let functions = enrich_functions(collector.functions, semantic);
 
-    ExtractionResult { functions: collector.functions, bindings, exports: collector.exports }
+    ExtractionResult { functions, bindings, exports: collector.exports }
+}
+
+struct FunctionRecord {
+    info: FunctionInfo,
+    span_start: u32,
+    span_end: u32,
 }
 
 struct Collector<'s> {
-    functions: Vec<FunctionInfo>,
+    functions: Vec<FunctionRecord>,
     exported_names: HashSet<String>,
     exports: Vec<ExportInfo>,
     lines: &'s LineIndex,
@@ -75,15 +82,21 @@ impl Collector<'_> {
             || self.in_default_export
             || name.as_ref().is_some_and(|n| self.exported_names.contains(n));
 
-        self.functions.push(FunctionInfo {
-            name,
-            kind,
-            exported,
-            is_async,
-            is_generator,
-            line: self.lines.line(span_start),
-            col: self.lines.col(span_start),
-            line_end: self.lines.line(span_end),
+        self.functions.push(FunctionRecord {
+            info: FunctionInfo {
+                name,
+                parent: None,
+                captures: Vec::new(),
+                kind,
+                exported,
+                is_async,
+                is_generator,
+                line: self.lines.line(span_start),
+                col: self.lines.col(span_start),
+                line_end: self.lines.line(span_end),
+            },
+            span_start,
+            span_end,
         });
     }
 
@@ -178,7 +191,7 @@ impl<'a> Visit<'a> for Collector<'_> {
             let prev_count = self.functions.len();
             ast_visit::walk::walk_variable_declarator(self, it);
             if self.functions.len() > prev_count {
-                let first_new = &mut self.functions[prev_count];
+                let first_new = &mut self.functions[prev_count].info;
                 if first_new.kind == FunctionKind::Arrow && first_new.name.is_none() {
                     first_new.name = Some(name);
                 }
@@ -256,6 +269,122 @@ impl Collector<'_> {
             _ => {}
         }
     }
+}
+
+fn enrich_functions(
+    mut records: Vec<FunctionRecord>,
+    semantic: &Semantic<'_>,
+) -> Vec<FunctionInfo> {
+    let parent_indices: Vec<Option<usize>> = records
+        .iter()
+        .enumerate()
+        .map(|(index, child)| {
+            records
+                .iter()
+                .enumerate()
+                .filter(|(candidate_index, candidate)| {
+                    *candidate_index != index
+                        && candidate.info.name.is_some()
+                        && candidate.span_start <= child.span_start
+                        && candidate.span_end >= child.span_end
+                        && (candidate.span_start < child.span_start
+                            || candidate.span_end > child.span_end)
+                })
+                .min_by_key(|(_, candidate)| candidate.span_end - candidate.span_start)
+                .map(|(candidate_index, _)| candidate_index)
+        })
+        .collect();
+
+    for index in 0..records.len() {
+        records[index].info.parent =
+            parent_indices[index].map(|parent| qualified_name(&records, &parent_indices, parent));
+    }
+
+    let scoping = semantic.scoping();
+    let mut captures: Vec<BTreeSet<String>> = vec![BTreeSet::new(); records.len()];
+
+    for symbol_id in scoping.symbol_ids() {
+        let Some(declaring_function_scope) =
+            nearest_function_scope(scoping, scoping.symbol_scope_id(symbol_id))
+        else {
+            continue;
+        };
+
+        for reference in scoping.get_resolved_references(symbol_id) {
+            let span = semantic.reference_span(reference);
+            let Some(function_index) = records
+                .iter()
+                .enumerate()
+                .filter(|(_, function)| {
+                    function.span_start <= span.start && function.span_end >= span.end
+                })
+                .min_by_key(|(_, function)| function.span_end - function.span_start)
+                .map(|(index, _)| index)
+            else {
+                continue;
+            };
+            let Some(reference_function_scope) =
+                nearest_function_scope(scoping, reference.scope_id())
+            else {
+                continue;
+            };
+
+            if declaring_function_scope != reference_function_scope
+                && scope_is_ancestor(scoping, declaring_function_scope, reference_function_scope)
+            {
+                captures[function_index].insert(scoping.symbol_name(symbol_id).to_string());
+            }
+        }
+    }
+
+    for (record, captures) in records.iter_mut().zip(captures) {
+        record.info.captures = captures.into_iter().collect();
+    }
+
+    records.into_iter().map(|record| record.info).collect()
+}
+
+fn qualified_name(
+    records: &[FunctionRecord],
+    parent_indices: &[Option<usize>],
+    index: usize,
+) -> String {
+    let mut names = Vec::new();
+    let mut current = Some(index);
+    while let Some(function_index) = current {
+        if let Some(name) = records[function_index].info.name.as_deref() {
+            names.push(name);
+        }
+        current = parent_indices[function_index];
+    }
+    names.reverse();
+    names.join(".")
+}
+
+fn nearest_function_scope(scoping: &oxc::semantic::Scoping, scope_id: ScopeId) -> Option<ScopeId> {
+    let mut current = Some(scope_id);
+    while let Some(id) = current {
+        if scoping.scope_flags(id).is_function() {
+            return Some(id);
+        }
+        current = scoping.scope_parent_id(id);
+    }
+    None
+}
+
+fn scope_is_ancestor(
+    scoping: &oxc::semantic::Scoping,
+    ancestor: ScopeId,
+    descendant: ScopeId,
+) -> bool {
+    let mut current = scoping.scope_parent_id(descendant);
+    while let Some(id) = current {
+        if id == ancestor {
+            return true;
+        }
+        current = scoping.scope_parent_id(id);
+    }
+    false
 }
 
 fn extract_bindings(

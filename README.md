@@ -7,7 +7,7 @@ A fast, deterministic static-analysis and search CLI for TypeScript and JavaScri
 
 ## Features
 
-- **Structural analysis** — extract functions, bindings, references, and exports with oxc
+- **Structural analysis** — extract functions, captures, bindings, references, exports, and rule violations with oxc
 - **Content and path search** — gitignore-aware, parallel grep with stable JSON output
 - **Project tree** — compact repository structure for quick orientation
 - **Agent-friendly** — deterministic output suitable for scripts and coding agents
@@ -65,6 +65,7 @@ scanr scan --root apps/web --mode verbose
 scanr scan --file src/index.ts
 scanr scan --mode files
 scanr scan --mode folders
+scanr scan --rules hoistable_nested_function
 ```
 
 Flags:
@@ -75,7 +76,11 @@ Flags:
 - `--exclude <patterns>` — excluded paths
 - `--max-bytes <bytes>` — maximum file size
 - `--function-kinds top|top+arrow|top+arrow+class|all` — function categories
+- `--rules <names>` — run selected rules (all rules run by default)
+- `--include-test-files` — include tests in hoistable nested function checks
 - `--file <path>` — scan one file
+
+Built-in rules are `no_unused_bindings`, `one_exported_function_per_file`, `max_functions_per_file`, and `hoistable_nested_function`. Function output includes each function's dotted parent and sorted list of captured enclosing bindings.
 
 ### `scanr tree`
 

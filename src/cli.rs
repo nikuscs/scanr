@@ -108,6 +108,10 @@ pub struct ScanArgs {
     #[arg(long, value_delimiter = ',')]
     pub rules: Vec<String>,
 
+    /// Include test files in hoistable nested function checks
+    #[arg(long)]
+    pub include_test_files: bool,
+
     /// Scan a single file instead of directory
     #[arg(long)]
     pub file: Option<String>,
