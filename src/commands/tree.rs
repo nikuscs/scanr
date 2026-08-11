@@ -114,7 +114,7 @@ fn build_function_annotations(
         .collect();
     let parsed = parsed.into_iter().collect::<Result<Vec<_>>>()?;
     let (indices, similarity_files): (Vec<_>, Vec<_>) = parsed.into_iter().unzip();
-    let duplicate_counts = function_duplicate_groups(&similarity_files, duplicate_threshold, 3)?;
+    let duplicate_counts = function_duplicate_groups(&similarity_files, duplicate_threshold, 1)?;
 
     let mut annotations = BTreeMap::new();
     for index in indices {

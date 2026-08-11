@@ -88,8 +88,8 @@ pub fn calculate_tsed(tree1: &Rc<TreeNode>, tree2: &Rc<TreeNode>, options: &TSED
     // Size ratio penalty: penalize when trees have very different sizes
     let size_ratio = size1.min(size2) / size1.max(size2);
 
-    if options.size_penalty {
-        // For short functions, make differences more pronounced
+    if options.size_penalty && distance > 0.0 {
+        // For short functions, make differences more pronounced without penalizing exact matches.
         let min_size = size1.min(size2);
 
         if min_size < 30.0 {
@@ -180,7 +180,7 @@ pub fn calculate_tsed_with_threshold(
     let mut similarity = tsed_similarity;
     let size_ratio = size1.min(size2) / size1.max(size2);
 
-    if options.size_penalty {
+    if options.size_penalty && distance > 0.0 {
         let min_size = size1.min(size2);
 
         if min_size < 30.0 {
@@ -236,6 +236,15 @@ mod tests {
 
         let similarity =
             calculate_tsed_from_code(code, code, "test1.ts", "test2.ts", &options).unwrap();
+        assert!((similarity - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_identical_short_code_with_size_penalty() {
+        let code = "const key = (id: string) => `clients/${id}`;";
+        let similarity =
+            calculate_tsed_from_code(code, code, "first.ts", "second.ts", &TSEDOptions::default())
+                .unwrap();
         assert!((similarity - 1.0).abs() < f64::EPSILON);
     }
 

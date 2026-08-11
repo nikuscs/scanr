@@ -461,8 +461,8 @@ pub fn compare_functions(
 
     let mut similarity = calculate_tsed(&tree1, &tree2, options);
 
-    // Apply size penalty for short functions if enabled
-    if options.size_penalty {
+    // Apply a size penalty only to non-identical short functions. Exact duplicates remain exact.
+    if options.size_penalty && similarity < 1.0 {
         let avg_lines = (func1.line_count() + func2.line_count()) as f64 / 2.0;
         if avg_lines < 10.0 {
             // Apply penalty: shorter functions get more penalty
@@ -770,6 +770,16 @@ mod tests {
         assert!(simple.node_count.is_some());
         assert!(complex.node_count.is_some());
         assert!(simple.node_count.unwrap() < complex.node_count.unwrap());
+    }
+
+    #[test]
+    fn test_exact_short_functions_are_not_size_penalized() {
+        let code = "const key = (id: string) => `clients/${id}`;";
+        let first = extract_functions("first.ts", code).unwrap().remove(0);
+        let second = extract_functions("second.ts", code).unwrap().remove(0);
+        let similarity =
+            compare_functions(&first, &second, code, code, &TSEDOptions::default()).unwrap();
+        assert!((similarity - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

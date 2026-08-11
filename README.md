@@ -124,7 +124,7 @@ scanr tree --functions
 scanr tree --functions --all-functions
 ```
 
-`--functions` annotates files with dotted function names. Anonymous callbacks are summarized as `+N anonymous`; `--all-functions` expands them. `--low-value-max-lines` controls `[L]` candidates, and `--duplicate-threshold` controls `[D:n]` groups (default `0.87`).
+`--functions` annotates files with dotted function names. Anonymous callbacks are summarized as `+N anonymous`; `--all-functions` expands them. `--low-value-max-lines` controls `[L]` candidates, and `--duplicate-threshold` controls `[D:n]` groups (default `0.87`). Duplicate markers include one-line functions, and exact short matches are not size-penalized.
 
 Markers:
 
