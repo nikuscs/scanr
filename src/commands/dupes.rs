@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
 
@@ -55,6 +55,50 @@ struct FunctionEntry {
     file_index: usize,
     function: FunctionDefinition,
     fingerprint: AstFingerprint,
+}
+
+pub type FunctionDuplicateKey = (String, u32, String);
+
+pub fn function_duplicate_groups(
+    files: &[SimilarityFile],
+    threshold: f64,
+    min_lines: u32,
+) -> Result<BTreeMap<FunctionDuplicateKey, usize>> {
+    let pairs = compare_function_pairs(
+        files,
+        &DupesArgs { root: String::new(), threshold, min_lines, types: false, print: false },
+    )?;
+    let mut edges: BTreeMap<FunctionDuplicateKey, Vec<FunctionDuplicateKey>> = BTreeMap::new();
+    for pair in pairs {
+        let first = (pair.first.path, pair.first.line as u32, pair.first.name);
+        let second = (pair.second.path, pair.second.line as u32, pair.second.name);
+        edges.entry(first.clone()).or_default().push(second.clone());
+        edges.entry(second).or_default().push(first);
+    }
+
+    let mut visited = BTreeSet::new();
+    let mut groups = BTreeMap::new();
+    for start in edges.keys() {
+        if visited.contains(start) {
+            continue;
+        }
+        let mut component = Vec::new();
+        let mut stack = vec![start.clone()];
+        while let Some(key) = stack.pop() {
+            if !visited.insert(key.clone()) {
+                continue;
+            }
+            component.push(key.clone());
+            if let Some(neighbors) = edges.get(&key) {
+                stack.extend(neighbors.iter().cloned());
+            }
+        }
+        let count = component.len();
+        for key in component {
+            groups.insert(key, count);
+        }
+    }
+    Ok(groups)
 }
 
 pub fn run(args: &DupesArgs) -> Result<()> {

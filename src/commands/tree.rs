@@ -3,17 +3,15 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 
 use anyhow::{Context, Result};
 use rayon::prelude::*;
 
+use crate::commands::dupes::function_duplicate_groups;
 use crate::scan::rules::{hoistable_function, is_test_path, low_value_function};
 use crate::scan::types::{FunctionInfo, FunctionKindsFilter};
 use crate::scan::typescript::parse::process_file_with_similarity;
 use crate::scan::{ScanConfig, collect_files};
-use crate::similarity::parser::parse_and_convert_to_tree;
-use crate::similarity::tree::TreeNode as SimilarityTreeNode;
 
 const IGNORE_DIRS: &[&str] = &[
     ".git",
@@ -52,6 +50,7 @@ pub fn run(
     functions: bool,
     all_functions: bool,
     low_value_max_lines: u32,
+    duplicate_threshold: f64,
 ) -> Result<()> {
     let project =
         fs::canonicalize(root).context("Cannot resolve project root")?.display().to_string();
@@ -68,8 +67,18 @@ pub fn run(
         anyhow::bail!("Path must be inside the project root");
     }
 
+    if !(0.0..=1.0).contains(&duplicate_threshold) {
+        anyhow::bail!("Duplicate threshold must be between 0 and 1");
+    }
+
     let annotations = if functions {
-        build_function_annotations(&start_path, &project_root, all_functions, low_value_max_lines)?
+        build_function_annotations(
+            &start_path,
+            &project_root,
+            all_functions,
+            low_value_max_lines,
+            duplicate_threshold,
+        )?
     } else {
         BTreeMap::new()
     };
@@ -96,6 +105,7 @@ fn build_function_annotations(
     project_root: &Path,
     all_functions: bool,
     low_value_max_lines: u32,
+    duplicate_threshold: f64,
 ) -> Result<BTreeMap<String, FunctionAnnotations>> {
     let files = collect_files(scan_root, &ScanConfig::default())?;
     let parsed: Vec<Result<_>> = files
@@ -103,46 +113,11 @@ fn build_function_annotations(
         .map(|path| process_file_with_similarity(path, project_root, FunctionKindsFilter::All))
         .collect();
     let parsed = parsed.into_iter().collect::<Result<Vec<_>>>()?;
-
-    let mut signature_entries = Vec::new();
-    for (_, similarity) in &parsed {
-        for function in &similarity.functions {
-            if function.has_ignore_directive {
-                continue;
-            }
-            let start = function.body_span.start as usize;
-            let end = function.body_span.end as usize;
-            let Some(body) = similarity.source.get(start..end) else {
-                continue;
-            };
-            let Ok(tree) = parse_and_convert_to_tree("function.tsx", body) else {
-                continue;
-            };
-            let mut signature = String::new();
-            append_tree_signature(&tree, &mut signature);
-            signature_entries.push((
-                similarity.path.clone(),
-                function.start_line,
-                function.name.clone(),
-                signature,
-            ));
-        }
-    }
-
-    let mut signature_counts = BTreeMap::new();
-    for (_, _, _, signature) in &signature_entries {
-        *signature_counts.entry(signature.clone()).or_insert(0usize) += 1;
-    }
-    let duplicate_counts: BTreeMap<_, _> = signature_entries
-        .into_iter()
-        .filter_map(|(path, line, name, signature)| {
-            let count = signature_counts[&signature];
-            (count > 1).then_some(((path, line, name), count))
-        })
-        .collect();
+    let (indices, similarity_files): (Vec<_>, Vec<_>) = parsed.into_iter().unzip();
+    let duplicate_counts = function_duplicate_groups(&similarity_files, duplicate_threshold, 3)?;
 
     let mut annotations = BTreeMap::new();
-    for (index, _) in parsed {
+    for index in indices {
         let test_file = is_test_path(&index.path);
         let entry =
             annotations.entry(index.path.clone()).or_insert_with(FunctionAnnotations::default);
@@ -204,17 +179,6 @@ fn function_label(
         markers.push(format!("[D:{count}]"));
     }
     FunctionLabel { line: function.line, name, markers }
-}
-
-fn append_tree_signature(node: &Rc<SimilarityTreeNode>, output: &mut String) {
-    output.push_str(&node.value.len().to_string());
-    output.push(':');
-    output.push_str(&node.value);
-    output.push('[');
-    for child in &node.children {
-        append_tree_signature(child, output);
-    }
-    output.push(']');
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -521,13 +485,40 @@ function outer() {
   const captured = () => local;
 }
 function tiny() { return save(); }
+function duplicateOne(values: number[]) {
+  let total = 0;
+  for (const value of values) {
+    if (value > 0) {
+      total += value;
+    }
+  }
+
+
+  return total;
+}
 ",
         )
         .expect("write a");
-        fs::write(tmp.path().join("b.ts"), "function other() { return save(); }\n")
-            .expect("write b");
+        fs::write(
+            tmp.path().join("b.ts"),
+            r"
+function duplicateOne(values: number[]) {
+  let total = 0;
+  for (const value of values) {
+    if (value > 0) {
+      total += value;
+    }
+  }
+
+
+  return total;
+}
+",
+        )
+        .expect("write b");
         let root = tmp.path().canonicalize().expect("canonical root");
-        let annotations = build_function_annotations(&root, &root, false, 3).expect("annotations");
+        let annotations =
+            build_function_annotations(&root, &root, false, 3, 0.0).expect("annotations");
         let a = annotations.get("a.ts").expect("a annotations");
         let marker_map: BTreeMap<_, _> =
             a.labels.iter().map(|label| (label.name.as_str(), label.markers.as_slice())).collect();
@@ -535,7 +526,10 @@ function tiny() { return save(); }
         assert!(marker_map["outer.hoistable"].contains(&"[H]".to_string()));
         assert!(marker_map["outer.hoistable"].contains(&"[L]".to_string()));
         assert!(marker_map["outer.captured"].contains(&"[C:1]".to_string()));
-        assert!(marker_map["tiny"].contains(&"[D:2]".to_string()), "annotations: {annotations:?}");
+        assert!(
+            marker_map["duplicateOne"].contains(&"[D:2]".to_string()),
+            "annotations: {annotations:?}"
+        );
     }
 
     #[test]

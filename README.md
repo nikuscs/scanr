@@ -124,14 +124,14 @@ scanr tree --functions
 scanr tree --functions --all-functions
 ```
 
-`--functions` annotates files with dotted function names. Anonymous callbacks are summarized as `+N anonymous`; `--all-functions` expands them. `--low-value-max-lines` controls `[L]` candidates.
+`--functions` annotates files with dotted function names. Anonymous callbacks are summarized as `+N anonymous`; `--all-functions` expands them. `--low-value-max-lines` controls `[L]` candidates, and `--duplicate-threshold` controls `[D:n]` groups (default `0.87`).
 
 Markers:
 
 - `[H]` — nested function captures nothing and can be hoisted
 - `[C:n]` — captures `n` enclosing function bindings
 - `[L]` — conservative low-value candidate
-- `[D:n]` — exact structural function shape appears `n` times; use `dupes` for similarity details
+- `[D:n]` — function belongs to an `n`-member similarity group at the configured threshold; use `dupes` for pair details
 
 ## Agent workflow
 

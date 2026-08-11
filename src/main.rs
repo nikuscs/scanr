@@ -23,6 +23,7 @@ fn main() -> Result<()> {
             functions,
             all_functions,
             low_value_max_lines,
+            duplicate_threshold,
         } => commands::tree::run(
             &root,
             path.as_deref(),
@@ -32,6 +33,7 @@ fn main() -> Result<()> {
             functions,
             all_functions,
             low_value_max_lines,
+            duplicate_threshold,
         ),
         Commands::Scan(args) => commands::scan::run(&args),
     }

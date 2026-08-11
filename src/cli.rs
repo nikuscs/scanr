@@ -52,6 +52,10 @@ pub enum Commands {
         /// Maximum lines for low-value function candidates
         #[arg(long, default_value_t = 3, requires = "functions")]
         low_value_max_lines: u32,
+
+        /// Similarity threshold for duplicate-group markers (0-1)
+        #[arg(long, default_value_t = 0.87, requires = "functions")]
+        duplicate_threshold: f64,
     },
 
     /// Structural scan: extract functions, bindings, and exports from TypeScript/JavaScript files

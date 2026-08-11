@@ -64,9 +64,9 @@ scanr dupes --threshold 0.9 --min-lines 5 --print
 
 **search**: `--root <path>` `--path` `-i|--ignore-case` `--glob <pattern>` `--max-count N` `--context N` `--json`
 
-**tree**: `--root <path>` `--path <subdir>` `--depth N` `--inline N` `--all` `--functions` `--all-functions` `--low-value-max-lines N`
+**tree**: `--root <path>` `--path <subdir>` `--depth N` `--inline N` `--all` `--functions` `--all-functions` `--low-value-max-lines N` `--duplicate-threshold 0.87`
 
-Markers: `[H]` hoistable, `[C:n]` captures, `[L]` low-value candidate, `[D:n]` exact structural group.
+Markers: `[H]` hoistable, `[C:n]` captures, `[L]` low-value candidate, `[D:n]` similarity group.
 
 **scan**: `--root <path>` `--mode compact|verbose|files|folders` `--file <path>` `--include ts,tsx,...` `--exclude <patterns>` `--function-kinds top|top+arrow|top+arrow+class|all` `--rules <rules>` `--include-test-files` `--low-value-max-lines N` `--max-bytes N`
 
