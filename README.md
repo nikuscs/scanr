@@ -49,8 +49,8 @@ scanr search "handler" --max-count 5 --json
 Search paths instead of contents:
 
 ```bash
-scanr search "components" --path
-scanr search '*.test.ts' --path
+scanr search --path "components"
+scanr search --path '*.test.ts'
 ```
 
 The walker respects `.gitignore`. Results are sorted by path and line, including when files are searched in parallel.

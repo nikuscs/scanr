@@ -20,7 +20,7 @@ scanr search "$ARGUMENTS" --json
 ```bash
 scanr search "useState" --json
 scanr search "todo" --ignore-case --glob '*.ts' --context 2
-scanr search "components" --path --json
+scanr search --path "components" --json
 ```
 
 ### Tree overview

@@ -20,8 +20,9 @@ rayon = "1.10"
 # JS/TS semantic analysis (scan module)
 oxc = { version = "0.123", features = ["semantic", "ast_visit"] }
 
-# File walking with .gitignore support
+# File walking and content search
 ignore = "0.4"
+fff-grep = "0.10.3"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

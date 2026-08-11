@@ -11,6 +11,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Search(args) => commands::search::run(&args),
         Commands::Tree { root, path, depth, inline, all } => {
             commands::tree::run(&root, path.as_deref(), depth, inline, all)
         }

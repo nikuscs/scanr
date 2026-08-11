@@ -258,6 +258,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "37909eebbb50d72f9059c3b6d82c0463f2ff062c9e95845c43a6c9c0355411be"
 
 [[package]]
+name = "fff-grep"
+version = "0.10.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8ed85f2c69394b60f2c46f0a292d1f07ca338d962e0ba7f00237be321de3593a"
+dependencies = [
+ "bstr",
+ "memchr",
+]
+
+[[package]]
 name = "foldhash"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -893,6 +903,7 @@ dependencies = [
  "anyhow",
  "assert_cmd",
  "clap",
+ "fff-grep",
  "ignore",
  "oxc",
  "rayon",

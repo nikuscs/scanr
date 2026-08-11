@@ -13,6 +13,9 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Search file contents or paths
+    Search(SearchArgs),
+
     /// Compact project structure overview for fast orientation
     Tree {
         /// Project root directory
@@ -38,6 +41,41 @@ pub enum Commands {
 
     /// Structural scan: extract functions, bindings, and exports from TypeScript/JavaScript files
     Scan(ScanArgs),
+}
+
+#[derive(clap::Args, Clone)]
+pub struct SearchArgs {
+    /// Literal content pattern (omit when using --path)
+    #[arg(required_unless_present = "path")]
+    pub pattern: Option<String>,
+
+    /// Search file paths with this substring or glob instead of file contents
+    #[arg(long, value_name = "PATTERN", conflicts_with = "pattern")]
+    pub path: Option<String>,
+
+    /// Project root directory
+    #[arg(long, default_value = ".")]
+    pub root: String,
+
+    /// Match ASCII letters case-insensitively
+    #[arg(short = 'i', long)]
+    pub ignore_case: bool,
+
+    /// Include only paths matching this gitignore-style glob (repeatable)
+    #[arg(long)]
+    pub glob: Vec<String>,
+
+    /// Stop after this many matching lines per file
+    #[arg(long)]
+    pub max_count: Option<usize>,
+
+    /// Include this many lines before and after each content match
+    #[arg(long, default_value_t = 0)]
+    pub context: usize,
+
+    /// Return structured JSON output
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(clap::Args, Clone)]
