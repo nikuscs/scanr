@@ -9,6 +9,7 @@ A fast, deterministic static-analysis and search CLI for TypeScript and JavaScri
 
 - **Structural analysis** — extract functions, captures, bindings, references, exports, and rule violations with oxc
 - **Content and path search** — gitignore-aware, parallel grep with stable JSON output
+- **Similarity detection** — APTED-based function and type comparison, including type literals
 - **Project tree** — compact repository structure for quick orientation
 - **Agent-friendly** — deterministic output suitable for scripts and coding agents
 
@@ -31,6 +32,7 @@ cargo build --release
 ```bash
 scanr search "useState" --root . --json
 scanr scan --root . --mode files
+scanr dupes --root . --types
 scanr tree --root .
 ```
 
@@ -82,6 +84,18 @@ Flags:
 
 Built-in rules are `no_unused_bindings`, `one_exported_function_per_file`, `max_functions_per_file`, and `hoistable_nested_function`. Function output includes each function's dotted parent and sorted list of captured enclosing bindings.
 
+### `scanr dupes`
+
+Find structurally similar functions, interfaces, aliases, and type literals:
+
+```bash
+scanr dupes --root src
+scanr dupes --root apps/web --types
+scanr dupes --threshold 0.9 --min-lines 5 --print
+```
+
+Output is deterministic JSON. Functions are checked by default; `--types` also enables unified type comparison. `--print` adds source text to each location.
+
 ### `scanr tree`
 
 Print a compact project structure:
@@ -102,4 +116,4 @@ cargo build --release
 
 ## License
 
-MIT
+MIT. The vendored similarity engine under `src/similarity/` is from mizchi's `similarity-core` 0.5.2 under the MIT license; see `src/similarity/LICENSE`.

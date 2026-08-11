@@ -11,7 +11,6 @@ use crate::scan::types::{FileIndex, FunctionKindsFilter};
 use crate::similarity::function_extractor::{FunctionDefinition, extract_functions_from_program};
 use crate::similarity::type_extractor::{TypeDefinition, TypeExtractor, TypeLiteralDefinition};
 
-#[allow(dead_code)]
 pub struct SimilarityFile {
     pub path: String,
     pub source: String,
@@ -24,7 +23,6 @@ pub fn process_file(path: &Path, root: &Path, filter: FunctionKindsFilter) -> Re
     process_file_inner(path, root, filter, false).map(|(index, _)| index)
 }
 
-#[allow(dead_code)]
 pub fn process_file_with_similarity(
     path: &Path,
     root: &Path,

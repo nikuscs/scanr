@@ -13,6 +13,9 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Find duplicate and similar functions and types
+    Dupes(DupesArgs),
+
     /// Search file contents or paths
     Search(SearchArgs),
 
@@ -41,6 +44,29 @@ pub enum Commands {
 
     /// Structural scan: extract functions, bindings, and exports from TypeScript/JavaScript files
     Scan(ScanArgs),
+}
+
+#[derive(clap::Args, Clone)]
+pub struct DupesArgs {
+    /// Project root directory
+    #[arg(long, default_value = ".")]
+    pub root: String,
+
+    /// Minimum similarity score (0-1)
+    #[arg(long, default_value_t = 0.87)]
+    pub threshold: f64,
+
+    /// Minimum function length in lines
+    #[arg(long, default_value_t = 3)]
+    pub min_lines: u32,
+
+    /// Include similar type and type-literal pairs
+    #[arg(long)]
+    pub types: bool,
+
+    /// Include source text for each match
+    #[arg(long)]
+    pub print: bool,
 }
 
 #[derive(clap::Args, Clone)]
