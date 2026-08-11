@@ -8,6 +8,7 @@ fn mk_fi(path: &str, fn_names: &[&str], binding_unused: bool) -> FileIndex {
             name: Some((*n).into()),
             parent: None,
             captures: Vec::new(),
+            low_value_reason: None,
             kind: FunctionKind::Declaration,
             exported: true,
             is_async: false,
@@ -117,6 +118,23 @@ fn hoistable_nested_function_skips_tests_unless_enabled() {
 
     run_rules_with_test_files(&["hoistable_nested_function".into()], &mut skipped, true);
     assert_eq!(skipped.violations[0].details, vec!["test.helper"]);
+}
+
+#[test]
+fn low_value_function_requires_trivial_shape_and_line_limit() {
+    let mut fi = mk_fi("src/helpers.ts", &["tiny", "long", "complex"], false);
+    fi.functions[0].low_value_reason = Some("thin_wrapper".into());
+    fi.functions[1].low_value_reason = Some("constant_return".into());
+    fi.functions[1].line_end = 10;
+
+    run_rules_with_options(
+        &["low_value_function".into()],
+        &mut fi,
+        RuleOptions { low_value_max_lines: 3, ..RuleOptions::default() },
+    );
+    let violation = fi.violations.first().unwrap();
+    assert_eq!(violation.count, 1);
+    assert_eq!(violation.details, vec!["tiny:thin_wrapper"]);
 }
 
 #[test]

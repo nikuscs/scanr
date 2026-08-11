@@ -1,6 +1,18 @@
 use std::collections::HashSet;
 
-use crate::scan::types::{BindingKind, FileIndex, FunctionKind, Violation};
+use crate::scan::types::{BindingKind, FileIndex, FunctionInfo, FunctionKind, Violation};
+
+#[derive(Clone, Copy)]
+pub struct RuleOptions {
+    pub include_test_files: bool,
+    pub low_value_max_lines: u32,
+}
+
+impl Default for RuleOptions {
+    fn default() -> Self {
+        Self { include_test_files: false, low_value_max_lines: 3 }
+    }
+}
 
 pub trait Rule: Send + Sync {
     fn name(&self) -> &'static str;
@@ -13,24 +25,38 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
         Box::new(OneExportedFunctionPerFile { path_prefix: None }),
         Box::new(MaxFunctionsPerFile { max: 20 }),
         Box::new(HoistableNestedFunction { include_test_files: false }),
+        Box::new(LowValueFunction { include_test_files: false, max_lines: 3 }),
     ]
 }
 
+#[allow(dead_code)]
 pub fn run_rules(enabled: &[String], index: &mut FileIndex) {
-    run_rules_with_test_files(enabled, index, false);
+    run_rules_with_options(enabled, index, RuleOptions::default());
 }
 
+#[allow(dead_code)]
 pub fn run_rules_with_test_files(
     enabled: &[String],
     index: &mut FileIndex,
     include_test_files: bool,
 ) {
+    run_rules_with_options(
+        enabled,
+        index,
+        RuleOptions { include_test_files, ..RuleOptions::default() },
+    );
+}
+
+pub fn run_rules_with_options(enabled: &[String], index: &mut FileIndex, options: RuleOptions) {
     let enabled_set: HashSet<&str> = enabled.iter().map(String::as_str).collect();
     let mut rules = all_rules();
-    if include_test_files {
-        rules.pop();
-        rules.push(Box::new(HoistableNestedFunction { include_test_files: true }));
-    }
+    rules.truncate(3);
+    rules
+        .push(Box::new(HoistableNestedFunction { include_test_files: options.include_test_files }));
+    rules.push(Box::new(LowValueFunction {
+        include_test_files: options.include_test_files,
+        max_lines: options.low_value_max_lines,
+    }));
 
     for rule in
         rules.into_iter().filter(|r| enabled_set.is_empty() || enabled_set.contains(r.name()))
@@ -114,13 +140,7 @@ impl Rule for HoistableNestedFunction {
         let functions: Vec<String> = index
             .functions
             .iter()
-            .filter(|function| function.parent.is_some() && function.captures.is_empty())
-            .filter(|function| {
-                matches!(
-                    function.kind,
-                    FunctionKind::Declaration | FunctionKind::Arrow | FunctionKind::Expression
-                )
-            })
+            .filter(|function| hoistable_function(function))
             .filter_map(|function| {
                 function.name.as_ref().map(|name| {
                     function
@@ -143,7 +163,71 @@ impl Rule for HoistableNestedFunction {
     }
 }
 
-fn is_test_path(path: &str) -> bool {
+struct LowValueFunction {
+    include_test_files: bool,
+    max_lines: u32,
+}
+
+impl Rule for LowValueFunction {
+    fn name(&self) -> &'static str {
+        "low_value_function"
+    }
+
+    fn check(&self, index: &FileIndex) -> Option<Violation> {
+        if !self.include_test_files && is_test_path(&index.path) {
+            return None;
+        }
+
+        let functions: Vec<String> = index
+            .functions
+            .iter()
+            .filter(|function| low_value_function(function, self.max_lines))
+            .filter_map(|function| {
+                function.name.as_ref().map(|name| {
+                    let qualified = function
+                        .parent
+                        .as_ref()
+                        .map_or_else(|| name.clone(), |parent| format!("{parent}.{name}"));
+                    format!(
+                        "{qualified}:{}",
+                        function.low_value_reason.as_deref().unwrap_or("trivial")
+                    )
+                })
+            })
+            .collect();
+
+        if functions.is_empty() {
+            return None;
+        }
+
+        Some(Violation {
+            rule: self.name().to_string(),
+            count: functions.len(),
+            details: functions,
+        })
+    }
+}
+
+pub const fn hoistable_function(function: &FunctionInfo) -> bool {
+    function.parent.is_some()
+        && function.captures.is_empty()
+        && matches!(
+            function.kind,
+            FunctionKind::Declaration | FunctionKind::Arrow | FunctionKind::Expression
+        )
+}
+
+pub const fn low_value_function(function: &FunctionInfo, max_lines: u32) -> bool {
+    function.name.is_some()
+        && function.low_value_reason.is_some()
+        && function.line_end.saturating_sub(function.line) < max_lines
+        && matches!(
+            function.kind,
+            FunctionKind::Declaration | FunctionKind::Arrow | FunctionKind::Expression
+        )
+}
+
+pub fn is_test_path(path: &str) -> bool {
     let normalized = path.replace('\\', "/").to_ascii_lowercase();
     normalized.split('/').any(|part| matches!(part, "test" | "tests" | "__tests__"))
         || normalized.contains(".test.")

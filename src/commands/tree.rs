@@ -1,9 +1,19 @@
 use std::cmp::Ordering;
+use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use anyhow::{Context, Result};
+use rayon::prelude::*;
+
+use crate::scan::rules::{hoistable_function, is_test_path, low_value_function};
+use crate::scan::types::{FunctionInfo, FunctionKindsFilter};
+use crate::scan::typescript::parse::process_file_with_similarity;
+use crate::scan::{ScanConfig, collect_files};
+use crate::similarity::parser::parse_and_convert_to_tree;
+use crate::similarity::tree::TreeNode as SimilarityTreeNode;
 
 const IGNORE_DIRS: &[&str] = &[
     ".git",
@@ -32,12 +42,16 @@ const INCLUDE_EXTS: &[&str] = &[
 const STRIP_EXTS: &[&str] =
     &["cjs", "cts", "go", "java", "js", "jsx", "mjs", "mts", "py", "rs", "ts", "tsx"];
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     root: &str,
     subpath: Option<&str>,
     depth: usize,
     inline: usize,
     all: bool,
+    functions: bool,
+    all_functions: bool,
+    low_value_max_lines: u32,
 ) -> Result<()> {
     let project =
         fs::canonicalize(root).context("Cannot resolve project root")?.display().to_string();
@@ -54,7 +68,12 @@ pub fn run(
         anyhow::bail!("Path must be inside the project root");
     }
 
-    let tree = build_node(&start_path, &project_root, all)?;
+    let annotations = if functions {
+        build_function_annotations(&start_path, &project_root, all_functions, low_value_max_lines)?
+    } else {
+        BTreeMap::new()
+    };
+    let tree = build_node(&start_path, &project_root, all, &annotations)?;
     let mut lines = Vec::new();
     lines.push("# Project Structure".to_string());
     lines.push(String::new());
@@ -72,9 +91,149 @@ pub fn run(
     Ok(())
 }
 
+fn build_function_annotations(
+    scan_root: &Path,
+    project_root: &Path,
+    all_functions: bool,
+    low_value_max_lines: u32,
+) -> Result<BTreeMap<String, FunctionAnnotations>> {
+    let files = collect_files(scan_root, &ScanConfig::default())?;
+    let parsed: Vec<Result<_>> = files
+        .par_iter()
+        .map(|path| process_file_with_similarity(path, project_root, FunctionKindsFilter::All))
+        .collect();
+    let parsed = parsed.into_iter().collect::<Result<Vec<_>>>()?;
+
+    let mut signature_entries = Vec::new();
+    for (_, similarity) in &parsed {
+        for function in &similarity.functions {
+            if function.has_ignore_directive {
+                continue;
+            }
+            let start = function.body_span.start as usize;
+            let end = function.body_span.end as usize;
+            let Some(body) = similarity.source.get(start..end) else {
+                continue;
+            };
+            let Ok(tree) = parse_and_convert_to_tree("function.tsx", body) else {
+                continue;
+            };
+            let mut signature = String::new();
+            append_tree_signature(&tree, &mut signature);
+            signature_entries.push((
+                similarity.path.clone(),
+                function.start_line,
+                function.name.clone(),
+                signature,
+            ));
+        }
+    }
+
+    let mut signature_counts = BTreeMap::new();
+    for (_, _, _, signature) in &signature_entries {
+        *signature_counts.entry(signature.clone()).or_insert(0usize) += 1;
+    }
+    let duplicate_counts: BTreeMap<_, _> = signature_entries
+        .into_iter()
+        .filter_map(|(path, line, name, signature)| {
+            let count = signature_counts[&signature];
+            (count > 1).then_some(((path, line, name), count))
+        })
+        .collect();
+
+    let mut annotations = BTreeMap::new();
+    for (index, _) in parsed {
+        let test_file = is_test_path(&index.path);
+        let entry =
+            annotations.entry(index.path.clone()).or_insert_with(FunctionAnnotations::default);
+        for function in &index.functions {
+            let Some(name) = function.name.as_deref() else {
+                if all_functions {
+                    entry.labels.push(function_label(
+                        function,
+                        format!("<anonymous@{}>", function.line),
+                        test_file,
+                        low_value_max_lines,
+                        None,
+                    ));
+                } else {
+                    entry.anonymous_count += 1;
+                }
+                continue;
+            };
+            let qualified = function
+                .parent
+                .as_ref()
+                .map_or_else(|| name.to_string(), |parent| format!("{parent}.{name}"));
+            let duplicate_count = duplicate_counts
+                .get(&(index.path.clone(), function.line, name.to_string()))
+                .copied();
+            entry.labels.push(function_label(
+                function,
+                qualified,
+                test_file,
+                low_value_max_lines,
+                duplicate_count,
+            ));
+        }
+        entry.labels.sort_by(|left, right| {
+            left.line.cmp(&right.line).then_with(|| left.name.cmp(&right.name))
+        });
+    }
+    Ok(annotations)
+}
+
+fn function_label(
+    function: &FunctionInfo,
+    name: String,
+    test_file: bool,
+    low_value_max_lines: u32,
+    duplicate_count: Option<usize>,
+) -> FunctionLabel {
+    let mut markers = Vec::new();
+    if !test_file && hoistable_function(function) {
+        markers.push("[H]".to_string());
+    }
+    if !function.captures.is_empty() {
+        markers.push(format!("[C:{}]", function.captures.len()));
+    }
+    if !test_file && low_value_function(function, low_value_max_lines) {
+        markers.push("[L]".to_string());
+    }
+    if let Some(count) = duplicate_count {
+        markers.push(format!("[D:{count}]"));
+    }
+    FunctionLabel { line: function.line, name, markers }
+}
+
+fn append_tree_signature(node: &Rc<SimilarityTreeNode>, output: &mut String) {
+    output.push_str(&node.value.len().to_string());
+    output.push(':');
+    output.push_str(&node.value);
+    output.push('[');
+    for child in &node.children {
+        append_tree_signature(child, output);
+    }
+    output.push(']');
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FunctionLabel {
+    line: u32,
+    name: String,
+    markers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct FunctionAnnotations {
+    labels: Vec<FunctionLabel>,
+    anonymous_count: usize,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FileEntry {
     name: String,
+    functions: FunctionAnnotations,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,9 +244,14 @@ struct TreeNode {
     files: Vec<FileEntry>,
 }
 
-fn build_node(abs_path: &Path, project_root: &Path, all: bool) -> Result<TreeNode> {
-    let rel_path = rel_path(project_root, abs_path);
-    let name = if rel_path.is_empty() {
+fn build_node(
+    abs_path: &Path,
+    project_root: &Path,
+    all: bool,
+    annotations: &BTreeMap<String, FunctionAnnotations>,
+) -> Result<TreeNode> {
+    let relative_path = rel_path(project_root, abs_path);
+    let name = if relative_path.is_empty() {
         abs_path.file_name().map_or_else(|| ".".to_string(), |n| n.to_string_lossy().into_owned())
     } else {
         abs_path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned())
@@ -112,17 +276,24 @@ fn build_node(abs_path: &Path, project_root: &Path, all: bool) -> Result<TreeNod
         }
 
         if file_type.is_file() && should_include_file(&entry_name) {
-            files.push(FileEntry { name: entry_name });
+            let path = entry.path();
+            let relative = rel_path(project_root, &path);
+            files.push(FileEntry {
+                name: entry_name,
+                functions: annotations.get(&relative).cloned().unwrap_or_default(),
+            });
         }
     }
 
     dir_specs.sort();
     files.sort_by(|a, b| natural_cmp(&a.name, &b.name));
 
-    let dirs: Vec<TreeNode> =
-        dir_specs.iter().map(|path| build_node(path, project_root, all)).collect::<Result<_>>()?;
+    let dirs: Vec<TreeNode> = dir_specs
+        .iter()
+        .map(|path| build_node(path, project_root, all, annotations))
+        .collect::<Result<_>>()?;
 
-    Ok(TreeNode { name, rel_path, dirs, files })
+    Ok(TreeNode { name, rel_path: relative_path, dirs, files })
 }
 
 fn render_node(
@@ -159,7 +330,10 @@ fn render_node(
     }
 
     if !is_root || !current.rel_path.is_empty() {
-        if current.dirs.is_empty() && current.files.len() <= inline {
+        if current.dirs.is_empty()
+            && current.files.len() <= inline
+            && current.files.iter().all(|file| file.functions == FunctionAnnotations::default())
+        {
             let file_str = current.files.iter().map(fmt_file).collect::<Vec<_>>().join(", ");
             if file_str.is_empty() {
                 lines.push(format!("{indent}{chain_name}"));
@@ -183,9 +357,39 @@ fn render_node(
 }
 
 fn render_file_list(files: &[FileEntry], lines: &mut Vec<String>, indent: &str, inline: usize) {
-    for chunk in files.chunks(inline) {
-        let rendered = chunk.iter().map(fmt_file).collect::<Vec<_>>().join(", ");
-        lines.push(format!("{indent}{rendered}"));
+    if files.iter().all(|file| file.functions == FunctionAnnotations::default()) {
+        for chunk in files.chunks(inline) {
+            let rendered = chunk.iter().map(fmt_file).collect::<Vec<_>>().join(", ");
+            lines.push(format!("{indent}{rendered}"));
+        }
+        return;
+    }
+
+    for file in files {
+        let mut functions: Vec<String> = file
+            .functions
+            .labels
+            .iter()
+            .map(|function| {
+                if function.markers.is_empty() {
+                    function.name.clone()
+                } else {
+                    format!("{} {}", function.name, function.markers.join(""))
+                }
+            })
+            .collect();
+        if file.functions.anonymous_count > 0 {
+            functions.push(format!("+{} anonymous", file.functions.anonymous_count));
+        }
+
+        if functions.is_empty() {
+            lines.push(format!("{indent}{}", fmt_file(file)));
+            continue;
+        }
+        for (index, chunk) in functions.chunks(inline).enumerate() {
+            let prefix = if index == 0 { fmt_file(file) } else { " ".repeat(fmt_file(file).len()) };
+            lines.push(format!("{indent}{prefix}  :: {}", chunk.join(", ")));
+        }
     }
 }
 
@@ -306,6 +510,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn function_annotations_include_layered_markers() {
+        let tmp = tempdir().expect("tempdir");
+        fs::write(
+            tmp.path().join("a.ts"),
+            r"
+function outer() {
+  const local = 1;
+  function hoistable() { return 1; }
+  const captured = () => local;
+}
+function tiny() { return save(); }
+",
+        )
+        .expect("write a");
+        fs::write(tmp.path().join("b.ts"), "function other() { return save(); }\n")
+            .expect("write b");
+        let root = tmp.path().canonicalize().expect("canonical root");
+        let annotations = build_function_annotations(&root, &root, false, 3).expect("annotations");
+        let a = annotations.get("a.ts").expect("a annotations");
+        let marker_map: BTreeMap<_, _> =
+            a.labels.iter().map(|label| (label.name.as_str(), label.markers.as_slice())).collect();
+
+        assert!(marker_map["outer.hoistable"].contains(&"[H]".to_string()));
+        assert!(marker_map["outer.hoistable"].contains(&"[L]".to_string()));
+        assert!(marker_map["outer.captured"].contains(&"[C:1]".to_string()));
+        assert!(marker_map["tiny"].contains(&"[D:2]".to_string()), "annotations: {annotations:?}");
+    }
+
+    #[test]
     fn includes_common_text_files() {
         assert!(should_include_file("main.rs"));
         assert!(should_include_file("README.md"));
@@ -325,9 +558,9 @@ mod tests {
     #[test]
     fn natural_sort_handles_numbers() {
         let mut names = [
-            FileEntry { name: "file10.ts".to_string() },
-            FileEntry { name: "file2.ts".to_string() },
-            FileEntry { name: "file1.ts".to_string() },
+            FileEntry { name: "file10.ts".to_string(), functions: FunctionAnnotations::default() },
+            FileEntry { name: "file2.ts".to_string(), functions: FunctionAnnotations::default() },
+            FileEntry { name: "file1.ts".to_string(), functions: FunctionAnnotations::default() },
         ];
         names.sort_by(|a, b| natural_cmp(&a.name, &b.name));
         let ordered: Vec<_> = names.iter().map(|f| f.name.as_str()).collect();
@@ -344,7 +577,7 @@ mod tests {
         fs::write(tmp.path().join("tests/main_test.rs"), "").expect("write test");
         fs::write(tmp.path().join("target/cache.txt"), "").expect("write cache");
 
-        let node = build_node(tmp.path(), tmp.path(), false).expect("build tree");
+        let node = build_node(tmp.path(), tmp.path(), false, &BTreeMap::new()).expect("build tree");
         let dir_names: BTreeSet<_> = node.dirs.iter().map(|dir| dir.name.as_str()).collect();
         assert!(dir_names.contains("src"));
         assert!(!dir_names.contains("tests"));
@@ -357,7 +590,7 @@ mod tests {
         fs::create_dir_all(tmp.path().join("tests")).expect("tests dir");
         fs::write(tmp.path().join("tests/main_test.rs"), "").expect("write test");
 
-        let node = build_node(tmp.path(), tmp.path(), true).expect("build tree");
+        let node = build_node(tmp.path(), tmp.path(), true, &BTreeMap::new()).expect("build tree");
         let dir_names: BTreeSet<_> = node.dirs.iter().map(|dir| dir.name.as_str()).collect();
         assert!(dir_names.contains("tests"));
     }
@@ -376,14 +609,20 @@ mod tests {
                     name: "utils".into(),
                     rel_path: "src/utils".into(),
                     dirs: vec![],
-                    files: vec![FileEntry { name: "helper.ts".into() }],
+                    files: vec![FileEntry {
+                        name: "helper.ts".into(),
+                        functions: FunctionAnnotations::default(),
+                    }],
                 }],
                 files: vec![
-                    FileEntry { name: "main.rs".into() },
-                    FileEntry { name: "lib.rs".into() },
+                    FileEntry { name: "main.rs".into(), functions: FunctionAnnotations::default() },
+                    FileEntry { name: "lib.rs".into(), functions: FunctionAnnotations::default() },
                 ],
             }],
-            files: vec![FileEntry { name: "Cargo.toml".into() }],
+            files: vec![FileEntry {
+                name: "Cargo.toml".into(),
+                functions: FunctionAnnotations::default(),
+            }],
         };
 
         let mut lines = Vec::new();
@@ -404,7 +643,10 @@ mod tests {
             name: "sub".into(),
             rel_path: "sub".into(),
             dirs: vec![],
-            files: vec![FileEntry { name: "index.ts".into() }],
+            files: vec![FileEntry {
+                name: "index.ts".into(),
+                functions: FunctionAnnotations::default(),
+            }],
         };
 
         let mut lines = Vec::new();
@@ -424,19 +666,25 @@ mod tests {
                     name: "a".into(),
                     rel_path: "pkg/a".into(),
                     dirs: vec![],
-                    files: vec![FileEntry { name: "x.ts".into() }],
+                    files: vec![FileEntry {
+                        name: "x.ts".into(),
+                        functions: FunctionAnnotations::default(),
+                    }],
                 },
                 TreeNode {
                     name: "b".into(),
                     rel_path: "pkg/b".into(),
                     dirs: vec![],
-                    files: vec![FileEntry { name: "y.ts".into() }],
+                    files: vec![FileEntry {
+                        name: "y.ts".into(),
+                        functions: FunctionAnnotations::default(),
+                    }],
                 },
             ],
             files: vec![
-                FileEntry { name: "one.rs".into() },
-                FileEntry { name: "two.rs".into() },
-                FileEntry { name: "three.rs".into() },
+                FileEntry { name: "one.rs".into(), functions: FunctionAnnotations::default() },
+                FileEntry { name: "two.rs".into(), functions: FunctionAnnotations::default() },
+                FileEntry { name: "three.rs".into(), functions: FunctionAnnotations::default() },
             ],
         };
 
@@ -465,7 +713,10 @@ mod tests {
             name: "d".into(),
             rel_path: "d".into(),
             dirs: vec![],
-            files: vec![FileEntry { name: "a.rs".into() }],
+            files: vec![FileEntry {
+                name: "a.rs".into(),
+                functions: FunctionAnnotations::default(),
+            }],
         };
         assert_eq!(summarize(&node), "(1f)");
     }
@@ -492,20 +743,35 @@ mod tests {
                         rel_path: "a/a1".into(),
                         dirs: vec![],
                         files: vec![
-                            FileEntry { name: "f1.rs".into() },
-                            FileEntry { name: "f2.rs".into() },
+                            FileEntry {
+                                name: "f1.rs".into(),
+                                functions: FunctionAnnotations::default(),
+                            },
+                            FileEntry {
+                                name: "f2.rs".into(),
+                                functions: FunctionAnnotations::default(),
+                            },
                         ],
                     }],
-                    files: vec![FileEntry { name: "f3.rs".into() }],
+                    files: vec![FileEntry {
+                        name: "f3.rs".into(),
+                        functions: FunctionAnnotations::default(),
+                    }],
                 },
                 TreeNode {
                     name: "b".into(),
                     rel_path: "b".into(),
                     dirs: vec![],
-                    files: vec![FileEntry { name: "f4.rs".into() }],
+                    files: vec![FileEntry {
+                        name: "f4.rs".into(),
+                        functions: FunctionAnnotations::default(),
+                    }],
                 },
             ],
-            files: vec![FileEntry { name: "f5.rs".into() }],
+            files: vec![FileEntry {
+                name: "f5.rs".into(),
+                functions: FunctionAnnotations::default(),
+            }],
         };
 
         let (dirs, files) = count_tree(&node);
@@ -521,7 +787,10 @@ mod tests {
             name: "leaf".into(),
             rel_path: "leaf".into(),
             dirs: vec![],
-            files: vec![FileEntry { name: "only.rs".into() }],
+            files: vec![FileEntry {
+                name: "only.rs".into(),
+                functions: FunctionAnnotations::default(),
+            }],
         };
         assert_eq!(count_tree(&node), (0, 1));
     }
@@ -674,7 +943,10 @@ mod tests {
                     name: "c".into(),
                     rel_path: "a/b/c".into(),
                     dirs: vec![],
-                    files: vec![FileEntry { name: "leaf.ts".into() }],
+                    files: vec![FileEntry {
+                        name: "leaf.ts".into(),
+                        functions: FunctionAnnotations::default(),
+                    }],
                 }],
                 files: vec![],
             }],
@@ -697,13 +969,19 @@ mod tests {
                     name: "b".into(),
                     rel_path: "a/b".into(),
                     dirs: vec![],
-                    files: vec![FileEntry { name: "x.ts".into() }],
+                    files: vec![FileEntry {
+                        name: "x.ts".into(),
+                        functions: FunctionAnnotations::default(),
+                    }],
                 },
                 TreeNode {
                     name: "c".into(),
                     rel_path: "a/c".into(),
                     dirs: vec![],
-                    files: vec![FileEntry { name: "y.ts".into() }],
+                    files: vec![FileEntry {
+                        name: "y.ts".into(),
+                        functions: FunctionAnnotations::default(),
+                    }],
                 },
             ],
             files: vec![],
@@ -727,9 +1005,15 @@ mod tests {
                 name: "b".into(),
                 rel_path: "a/b".into(),
                 dirs: vec![],
-                files: vec![FileEntry { name: "inner.ts".into() }],
+                files: vec![FileEntry {
+                    name: "inner.ts".into(),
+                    functions: FunctionAnnotations::default(),
+                }],
             }],
-            files: vec![FileEntry { name: "outer.rs".into() }],
+            files: vec![FileEntry {
+                name: "outer.rs".into(),
+                functions: FunctionAnnotations::default(),
+            }],
         };
 
         let mut lines = Vec::new();
@@ -754,11 +1038,20 @@ mod tests {
                     rel_path: "top/mid/deep".into(),
                     dirs: vec![],
                     files: vec![
-                        FileEntry { name: "a.rs".into() },
-                        FileEntry { name: "b.rs".into() },
+                        FileEntry {
+                            name: "a.rs".into(),
+                            functions: FunctionAnnotations::default(),
+                        },
+                        FileEntry {
+                            name: "b.rs".into(),
+                            functions: FunctionAnnotations::default(),
+                        },
                     ],
                 }],
-                files: vec![FileEntry { name: "c.rs".into() }, FileEntry { name: "d.rs".into() }],
+                files: vec![
+                    FileEntry { name: "c.rs".into(), functions: FunctionAnnotations::default() },
+                    FileEntry { name: "d.rs".into(), functions: FunctionAnnotations::default() },
+                ],
             }],
             files: vec![],
         };
@@ -804,7 +1097,7 @@ mod tests {
         fs::write(tmp.path().join("image.png"), "").expect("write png");
         fs::write(tmp.path().join("data.bin"), "").expect("write bin");
 
-        let node = build_node(tmp.path(), tmp.path(), false).expect("build");
+        let node = build_node(tmp.path(), tmp.path(), false, &BTreeMap::new()).expect("build");
         let file_names: BTreeSet<_> = node.files.iter().map(|f| f.name.as_str()).collect();
         assert!(file_names.contains("app.ts"));
         assert!(file_names.contains("style.css"));
@@ -819,7 +1112,7 @@ mod tests {
         fs::write(tmp.path().join("Makefile"), "all:").expect("write");
         fs::write(tmp.path().join("randomfile"), "stuff").expect("write");
 
-        let node = build_node(tmp.path(), tmp.path(), false).expect("build");
+        let node = build_node(tmp.path(), tmp.path(), false, &BTreeMap::new()).expect("build");
         let file_names: BTreeSet<_> = node.files.iter().map(|f| f.name.as_str()).collect();
         assert!(file_names.contains("Dockerfile"));
         assert!(file_names.contains("Makefile"));
@@ -834,7 +1127,7 @@ mod tests {
         fs::create_dir_all(tmp.path().join("visible")).expect("mkdir");
         fs::write(tmp.path().join("visible/code.rs"), "").expect("write");
 
-        let node = build_node(tmp.path(), tmp.path(), false).expect("build");
+        let node = build_node(tmp.path(), tmp.path(), false, &BTreeMap::new()).expect("build");
         let dir_names: BTreeSet<_> = node.dirs.iter().map(|d| d.name.as_str()).collect();
         assert!(!dir_names.contains(".hidden"));
         assert!(dir_names.contains("visible"));

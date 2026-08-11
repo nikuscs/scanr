@@ -29,6 +29,8 @@ scanr search --path "components" --json
 scanr tree
 scanr tree --path src/commands
 scanr tree --depth 4
+scanr tree --functions              # dotted functions + H/C/L/D markers
+scanr tree --functions --all-functions
 ```
 
 ### Structural scan
@@ -38,6 +40,7 @@ scanr scan --mode files
 scanr scan --mode folders
 scanr scan --file src/api.ts
 scanr scan --mode compact
+scanr scan --rules hoistable_nested_function,low_value_function
 ```
 
 ### Similarity detection
@@ -53,6 +56,7 @@ scanr dupes --threshold 0.9 --min-lines 5 --print
 - Find a literal name or text → `scanr search`
 - Find a file by path → `scanr search --path`
 - Inspect repository shape → `scanr tree`
+- Spot hoistable/capturing/low-value/duplicate functions → `scanr tree --functions`
 - List functions, bindings, exports, captures, or violations → `scanr scan`
 - Find similar functions or types → `scanr dupes`
 
@@ -60,8 +64,10 @@ scanr dupes --threshold 0.9 --min-lines 5 --print
 
 **search**: `--root <path>` `--path` `-i|--ignore-case` `--glob <pattern>` `--max-count N` `--context N` `--json`
 
-**tree**: `--root <path>` `--path <subdir>` `--depth N` `--inline N` `--all`
+**tree**: `--root <path>` `--path <subdir>` `--depth N` `--inline N` `--all` `--functions` `--all-functions` `--low-value-max-lines N`
 
-**scan**: `--root <path>` `--mode compact|verbose|files|folders` `--file <path>` `--include ts,tsx,...` `--exclude <patterns>` `--function-kinds top|top+arrow|top+arrow+class|all` `--rules <rules>` `--include-test-files` `--max-bytes N`
+Markers: `[H]` hoistable, `[C:n]` captures, `[L]` low-value candidate, `[D:n]` exact structural group.
+
+**scan**: `--root <path>` `--mode compact|verbose|files|folders` `--file <path>` `--include ts,tsx,...` `--exclude <patterns>` `--function-kinds top|top+arrow|top+arrow+class|all` `--rules <rules>` `--include-test-files` `--low-value-max-lines N` `--max-bytes N`
 
 **dupes**: `--root <path>` `--threshold <0-1>` `--min-lines N` `--types` `--print`

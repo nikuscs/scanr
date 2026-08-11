@@ -1,10 +1,10 @@
 use std::collections::{BTreeSet, HashSet};
 
 use oxc::ast::ast::{
-    ArrowFunctionExpression, BindingPattern, Declaration, ExportDeclaration,
+    ArrowFunctionBody, ArrowFunctionExpression, BindingPattern, Declaration, ExportDeclaration,
     ExportDefaultDeclaration, ExportDefaultDeclarationKind, ExportNamedDeclaration, Expression,
-    FormalParameters, Function, FunctionType, MethodDefinition, MethodDefinitionKind,
-    ObjectProperty, PropertyKind, VariableDeclarator,
+    FormalParameters, Function, FunctionBody, FunctionType, MethodDefinition, MethodDefinitionKind,
+    ObjectProperty, PropertyKind, Statement, VariableDeclarator,
 };
 use oxc::ast_visit::{self, Visit};
 use oxc::semantic::Semantic;
@@ -66,12 +66,14 @@ struct Collector<'s> {
 }
 
 impl Collector<'_> {
+    #[allow(clippy::too_many_arguments)]
     fn push_function(
         &mut self,
         name: Option<String>,
         kind: FunctionKind,
         is_async: bool,
         is_generator: bool,
+        low_value_reason: Option<&'static str>,
         span_start: u32,
         span_end: u32,
     ) {
@@ -87,6 +89,7 @@ impl Collector<'_> {
                 name,
                 parent: None,
                 captures: Vec::new(),
+                low_value_reason: low_value_reason.map(str::to_string),
                 kind,
                 exported,
                 is_async,
@@ -165,7 +168,15 @@ impl<'a> Visit<'a> for Collector<'_> {
             }
         };
         let name = it.id.as_ref().map(|id| id.name.to_string());
-        self.push_function(name, kind, it.r#async, it.generator, it.span.start, it.span.end);
+        self.push_function(
+            name,
+            kind,
+            it.r#async,
+            it.generator,
+            it.body.as_deref().and_then(classify_function_body),
+            it.span.start,
+            it.span.end,
+        );
         ast_visit::walk::walk_function(self, it, flags);
     }
 
@@ -176,6 +187,7 @@ impl<'a> Visit<'a> for Collector<'_> {
             FunctionKind::Arrow,
             it.r#async,
             false,
+            classify_arrow_body(&it.body),
             it.span.start,
             it.span.end,
         );
@@ -210,7 +222,15 @@ impl<'a> Visit<'a> for Collector<'_> {
             MethodDefinitionKind::Method => FunctionKind::ClassMethod,
         };
         let name = it.key.name().map(|n| n.to_string());
-        self.push_function(name, kind, func.r#async, func.generator, it.span.start, it.span.end);
+        self.push_function(
+            name,
+            kind,
+            func.r#async,
+            func.generator,
+            func.body.as_deref().and_then(classify_function_body),
+            it.span.start,
+            it.span.end,
+        );
         self.in_method = true;
         ast_visit::walk::walk_method_definition(self, it);
         self.in_method = false;
@@ -230,6 +250,7 @@ impl<'a> Visit<'a> for Collector<'_> {
                     kind,
                     func.r#async,
                     func.generator,
+                    func.body.as_deref().and_then(classify_function_body),
                     it.span.start,
                     it.span.end,
                 );
@@ -268,6 +289,53 @@ impl Collector<'_> {
             }
             _ => {}
         }
+    }
+}
+
+fn classify_arrow_body(body: &ArrowFunctionBody<'_>) -> Option<&'static str> {
+    match body {
+        ArrowFunctionBody::FunctionBody(body) => classify_function_body(body),
+        _ => body.as_expression().and_then(classify_expression),
+    }
+}
+
+fn classify_function_body(body: &FunctionBody<'_>) -> Option<&'static str> {
+    match body.statements.as_slice() {
+        [] => Some("empty"),
+        [Statement::ReturnStatement(statement)] => {
+            statement.argument.as_ref().map_or(Some("empty_return"), classify_expression)
+        }
+        [Statement::ExpressionStatement(statement)] => match &statement.expression {
+            Expression::CallExpression(_) => Some("side_effect_wrapper"),
+            Expression::AwaitExpression(await_expression)
+                if matches!(&await_expression.argument, Expression::CallExpression(_)) =>
+            {
+                Some("side_effect_wrapper")
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn classify_expression(expression: &Expression<'_>) -> Option<&'static str> {
+    match expression {
+        Expression::BooleanLiteral(_)
+        | Expression::NullLiteral(_)
+        | Expression::NumericLiteral(_)
+        | Expression::BigIntLiteral(_)
+        | Expression::StringLiteral(_) => Some("constant_return"),
+        Expression::Identifier(_) => Some("identity_return"),
+        Expression::ComputedMemberExpression(_)
+        | Expression::StaticMemberExpression(_)
+        | Expression::PrivateFieldExpression(_) => Some("property_return"),
+        Expression::CallExpression(_) | Expression::NewExpression(_) => Some("thin_wrapper"),
+        Expression::AwaitExpression(await_expression)
+            if matches!(&await_expression.argument, Expression::CallExpression(_)) =>
+        {
+            Some("thin_wrapper")
+        }
+        _ => None,
     }
 }
 

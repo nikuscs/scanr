@@ -86,6 +86,8 @@ pub struct FunctionInfo {
     pub name: Option<String>,
     pub parent: Option<String>,
     pub captures: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub low_value_reason: Option<String>,
     pub kind: FunctionKind,
     pub exported: bool,
     pub is_async: bool,

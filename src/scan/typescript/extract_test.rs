@@ -124,6 +124,33 @@ fn nested_functions_record_parents_and_enclosing_captures() {
 }
 
 #[test]
+fn classifies_only_trivial_low_value_shapes() {
+    let allocator = Allocator::default();
+    let src = r"
+        function empty() {}
+        const constant = () => 1;
+        function wrapper(value: string) { return save(value); }
+        function complex(value: number) { const next = value + 1; return next; }
+    ";
+    let st = SourceType::ts().with_module(true);
+    let ret = Parser::new(&allocator, src, st).with_options(ParseOptions::default()).parse();
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(&ret.program).semantic;
+    let result = extract_file(&ret.program, &semantic, src, FunctionKindsFilter::All);
+    let functions: std::collections::BTreeMap<_, _> = result
+        .functions
+        .iter()
+        .filter_map(|function| {
+            function.name.as_deref().map(|name| (name, function.low_value_reason.as_deref()))
+        })
+        .collect();
+
+    assert_eq!(functions["empty"], Some("empty"));
+    assert_eq!(functions["constant"], Some("constant_return"));
+    assert_eq!(functions["wrapper"], Some("thin_wrapper"));
+    assert_eq!(functions["complex"], None);
+}
+
+#[test]
 fn default_export_misc_and_assignment_pattern_fallback() {
     let allocator = Allocator::default();
     let src = r"

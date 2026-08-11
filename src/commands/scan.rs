@@ -38,12 +38,12 @@ pub fn run(args: &ScanArgs) -> Result<()> {
         scan::scan_directory(root, &config)?
     };
 
+    let rule_options = crate::scan::rules::RuleOptions {
+        include_test_files: args.include_test_files,
+        low_value_max_lines: args.low_value_max_lines,
+    };
     for index in &mut result.file_indices {
-        if args.include_test_files {
-            crate::scan::rules::run_rules_with_test_files(&args.rules, index, true);
-        } else {
-            crate::scan::rules::run_rules(&args.rules, index);
-        }
+        crate::scan::rules::run_rules_with_options(&args.rules, index, rule_options);
     }
 
     let stdout = std::io::stdout();

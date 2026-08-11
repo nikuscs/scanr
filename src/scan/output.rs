@@ -30,13 +30,14 @@ pub fn write_result<W: Write>(
     Ok(())
 }
 
-type CompactFunction = (String, u32, u32, String, u8, String, Option<String>, Vec<String>);
+type CompactFunction =
+    (String, u32, u32, String, u8, String, Option<String>, Vec<String>, Option<String>);
 
 #[derive(Serialize)]
 struct CompactOutput {
     ver: u8,
     stats: Stats,
-    /// Functions: [file, line, col, name, exported(0/1), kind, parent, captures]
+    /// Functions: [file, line, col, name, exported(0/1), kind, parent, captures, `low_value_reason`]
     f: Vec<CompactFunction>,
     /// Bindings: [file, line, col, name, kind, refs]
     b: Vec<(String, u32, u32, String, String, usize)>,
@@ -71,6 +72,7 @@ impl From<&ScanResult> for CompactOutput {
                     func.kind.code().to_string(),
                     func.parent.clone(),
                     func.captures.clone(),
+                    func.low_value_reason.clone(),
                 ));
             }
             for binding in &fi.bindings {
@@ -122,6 +124,7 @@ struct VerboseFunction {
     name: Option<String>,
     parent: Option<String>,
     captures: Vec<String>,
+    low_value_reason: Option<String>,
     kind: String,
     exported: bool,
     is_async: bool,
@@ -186,6 +189,7 @@ impl From<&ScanResult> for VerboseOutput {
                     name: func.name.clone(),
                     parent: func.parent.clone(),
                     captures: func.captures.clone(),
+                    low_value_reason: func.low_value_reason.clone(),
                     kind: func.kind.label().to_string(),
                     exported: func.exported,
                     is_async: func.is_async,

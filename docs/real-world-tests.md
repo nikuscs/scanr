@@ -22,12 +22,15 @@
 - [ ] Compact, verbose, files, and folders modes serialize deterministically
 - [ ] Rules report expected violations
 - [ ] Nested functions expose parent and capture information
+- [ ] Low-value findings are limited to conservative trivial shapes and the configured line limit
 
 ## Tree
 
 - [ ] Ignored and hidden directories are omitted
 - [ ] Test paths are omitted by default and included with `--all`
 - [ ] Natural sorting and depth collapsing remain stable
+- [ ] `--functions` emits stable dotted names and `[H]`, `[C:n]`, `[L]`, `[D:n]` markers
+- [ ] `--all-functions` expands callbacks otherwise summarized as `+N anonymous`
 
 ## Similarity
 

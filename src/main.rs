@@ -14,9 +14,25 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Dupes(args) => commands::dupes::run(&args),
         Commands::Search(args) => commands::search::run(&args),
-        Commands::Tree { root, path, depth, inline, all } => {
-            commands::tree::run(&root, path.as_deref(), depth, inline, all)
-        }
+        Commands::Tree {
+            root,
+            path,
+            depth,
+            inline,
+            all,
+            functions,
+            all_functions,
+            low_value_max_lines,
+        } => commands::tree::run(
+            &root,
+            path.as_deref(),
+            depth,
+            inline,
+            all,
+            functions,
+            all_functions,
+            low_value_max_lines,
+        ),
         Commands::Scan(args) => commands::scan::run(&args),
     }
 }

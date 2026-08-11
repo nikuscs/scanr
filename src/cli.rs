@@ -40,6 +40,18 @@ pub enum Commands {
         /// Include test directories and test files
         #[arg(long)]
         all: bool,
+
+        /// Annotate files with compact function trees and analysis markers
+        #[arg(long)]
+        functions: bool,
+
+        /// Show anonymous callbacks instead of summarizing their count
+        #[arg(long, requires = "functions")]
+        all_functions: bool,
+
+        /// Maximum lines for low-value function candidates
+        #[arg(long, default_value_t = 3, requires = "functions")]
+        low_value_max_lines: u32,
     },
 
     /// Structural scan: extract functions, bindings, and exports from TypeScript/JavaScript files
@@ -134,9 +146,13 @@ pub struct ScanArgs {
     #[arg(long, value_delimiter = ',')]
     pub rules: Vec<String>,
 
-    /// Include test files in hoistable nested function checks
+    /// Include test files in scope and low-value checks
     #[arg(long)]
     pub include_test_files: bool,
+
+    /// Maximum lines for low-value function candidates
+    #[arg(long, default_value_t = 3)]
+    pub low_value_max_lines: u32,
 
     /// Scan a single file instead of directory
     #[arg(long)]

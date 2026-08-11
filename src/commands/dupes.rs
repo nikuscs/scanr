@@ -290,4 +290,29 @@ mod tests {
         assert_eq!(output.types.len(), 1);
         assert!(output.functions[0].first.source.is_some());
     }
+
+    #[test]
+    fn analyze_compares_tsx_function_bodies() {
+        let root = tempdir().unwrap();
+        fs::write(
+            root.path().join("first.tsx"),
+            "export function FirstCard() {\n  const label = 'first';\n  return <div>{label}</div>;\n}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.path().join("second.tsx"),
+            "export function SecondCard() {\n  const text = 'second';\n  return <div>{text}</div>;\n}\n",
+        )
+        .unwrap();
+
+        let output = analyze(&DupesArgs {
+            root: root.path().to_string_lossy().into_owned(),
+            threshold: 0.0,
+            min_lines: 1,
+            types: false,
+            print: false,
+        })
+        .unwrap();
+        assert_eq!(output.functions.len(), 1);
+    }
 }

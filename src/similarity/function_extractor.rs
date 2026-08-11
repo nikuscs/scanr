@@ -456,8 +456,8 @@ pub fn compare_functions(
     let body2 = extract_body_text(func2, source2);
 
     // Parse and compare
-    let tree1 = parse_and_convert_to_tree("func1.ts", &body1)?;
-    let tree2 = parse_and_convert_to_tree("func2.ts", &body2)?;
+    let tree1 = parse_and_convert_to_tree("func1.tsx", &body1)?;
+    let tree2 = parse_and_convert_to_tree("func2.tsx", &body2)?;
 
     let mut similarity = calculate_tsed(&tree1, &tree2, options);
 
@@ -492,7 +492,7 @@ fn count_function_nodes(body_span: Span, source_text: &str) -> Option<u32> {
 
     // For now, try to parse the text as-is
     // If it fails, try wrapping it in a way that makes it valid TypeScript
-    match parse_and_convert_to_tree("temp.ts", body_text) {
+    match parse_and_convert_to_tree("temp.tsx", body_text) {
         Ok(tree) => Some(tree.get_subtree_size() as u32),
         Err(_) => {
             // If direct parsing fails, try wrapping in a minimal context
@@ -515,7 +515,7 @@ fn count_function_nodes(body_span: Span, source_text: &str) -> Option<u32> {
                 body_text.to_string()
             };
 
-            match parse_and_convert_to_tree("temp.ts", &wrapped) {
+            match parse_and_convert_to_tree("temp.tsx", &wrapped) {
                 Ok(tree) => {
                     // Subtract nodes added by wrapping (approximation)
                     let base_nodes = if wrapped.starts_with("class C") {
