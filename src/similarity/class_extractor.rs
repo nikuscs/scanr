@@ -1,9 +1,9 @@
-use oxc_allocator::Allocator;
-use oxc_ast::ast::{ClassElement, MethodDefinitionKind, Statement};
-use oxc_parser::Parser;
-use oxc_span::SourceType;
+use oxc::allocator::Allocator;
+use oxc::ast::ast::{ClassElement, MethodDefinitionKind, Statement};
+use oxc::parser::Parser;
+use oxc::span::SourceType;
 
-use crate::ignore_directive::has_similarity_ignore_directive;
+use crate::similarity::ignore_directive::has_similarity_ignore_directive;
 
 #[derive(Debug, Clone)]
 pub struct ClassDefinition {
@@ -79,8 +79,8 @@ impl ClassExtractor {
         }
     }
 
-    fn extract_type_string(&self, type_annotation: &oxc_ast::ast::TSTypeAnnotation) -> String {
-        use oxc_ast::ast::TSType;
+    fn extract_type_string(&self, type_annotation: &oxc::ast::ast::TSTypeAnnotation) -> String {
+        use oxc::ast::ast::TSType;
 
         match &type_annotation.type_annotation {
             TSType::TSStringKeyword(_) => "string".to_string(),
@@ -96,7 +96,7 @@ impl ClassExtractor {
                 format!("{}[]", self.extract_type_string_from_ts_type(&array.element_type))
             }
             TSType::TSTypeReference(type_ref) => match &type_ref.type_name {
-                oxc_ast::ast::TSTypeName::IdentifierReference(ident) => {
+                oxc::ast::ast::TSTypeName::IdentifierReference(ident) => {
                     let base = ident.name.as_str();
                     if let Some(params) = &type_ref.type_arguments {
                         let param_strings: Vec<String> = params
@@ -135,12 +135,12 @@ impl ClassExtractor {
                     .members
                     .iter()
                     .filter_map(|member| {
-                        if let oxc_ast::ast::TSSignature::TSPropertySignature(prop) = member {
+                        if let oxc::ast::ast::TSSignature::TSPropertySignature(prop) = member {
                             let name = match &prop.key {
-                                oxc_ast::ast::PropertyKey::StaticIdentifier(ident) => {
+                                oxc::ast::ast::PropertyKey::StaticIdentifier(ident) => {
                                     ident.name.as_str().to_string()
                                 }
-                                oxc_ast::ast::PropertyKey::StringLiteral(str_lit) => {
+                                oxc::ast::ast::PropertyKey::StringLiteral(str_lit) => {
                                     str_lit.value.as_str().to_string()
                                 }
                                 _ => return None,
@@ -163,8 +163,8 @@ impl ClassExtractor {
         }
     }
 
-    fn extract_type_string_from_ts_type(&self, ts_type: &oxc_ast::ast::TSType) -> String {
-        use oxc_ast::ast::TSType;
+    fn extract_type_string_from_ts_type(&self, ts_type: &oxc::ast::ast::TSType) -> String {
+        use oxc::ast::ast::TSType;
 
         match ts_type {
             TSType::TSStringKeyword(_) => "string".to_string(),
@@ -180,7 +180,7 @@ impl ClassExtractor {
                 format!("{}[]", self.extract_type_string_from_ts_type(&array.element_type))
             }
             TSType::TSTypeReference(type_ref) => match &type_ref.type_name {
-                oxc_ast::ast::TSTypeName::IdentifierReference(ident) => {
+                oxc::ast::ast::TSTypeName::IdentifierReference(ident) => {
                     ident.name.as_str().to_string()
                 }
                 _ => "unknown".to_string(),
@@ -209,12 +209,12 @@ impl ClassExtractor {
                     .members
                     .iter()
                     .filter_map(|member| {
-                        if let oxc_ast::ast::TSSignature::TSPropertySignature(prop) = member {
+                        if let oxc::ast::ast::TSSignature::TSPropertySignature(prop) = member {
                             let name = match &prop.key {
-                                oxc_ast::ast::PropertyKey::StaticIdentifier(ident) => {
+                                oxc::ast::ast::PropertyKey::StaticIdentifier(ident) => {
                                     ident.name.as_str().to_string()
                                 }
-                                oxc_ast::ast::PropertyKey::StringLiteral(str_lit) => {
+                                oxc::ast::ast::PropertyKey::StringLiteral(str_lit) => {
                                     str_lit.value.as_str().to_string()
                                 }
                                 _ => return None,
@@ -237,13 +237,13 @@ impl ClassExtractor {
         }
     }
 
-    fn extract_function_params(&self, params: &oxc_ast::ast::FormalParameters) -> String {
+    fn extract_function_params(&self, params: &oxc::ast::ast::FormalParameters) -> String {
         let param_strings: Vec<String> = params
             .items
             .iter()
             .map(|param| {
                 let name = match &param.pattern {
-                    oxc_ast::ast::BindingPattern::BindingIdentifier(ident) => ident.name.as_str(),
+                    oxc::ast::ast::BindingPattern::BindingIdentifier(ident) => ident.name.as_str(),
                     _ => "param",
                 };
                 let type_str = param
@@ -257,7 +257,7 @@ impl ClassExtractor {
         param_strings.join(", ")
     }
 
-    fn extract_class(&self, class: &oxc_ast::ast::Class) -> ClassDefinition {
+    fn extract_class(&self, class: &oxc::ast::ast::Class) -> ClassDefinition {
         let name = class
             .id
             .as_ref()
@@ -268,7 +268,7 @@ impl ClassExtractor {
         let end_line = self.get_line_number(class.span.end as usize);
 
         let extends = class.super_class.as_ref().and_then(|super_class| {
-            if let oxc_ast::ast::Expression::Identifier(ident) = super_class {
+            if let oxc::ast::ast::Expression::Identifier(ident) = super_class {
                 Some(ident.name.as_str().to_string())
             } else {
                 None
@@ -279,7 +279,7 @@ impl ClassExtractor {
             .implements
             .iter()
             .filter_map(|impl_clause| match &impl_clause.expression {
-                oxc_ast::ast::TSTypeName::IdentifierReference(ident) => {
+                oxc::ast::ast::TSTypeName::IdentifierReference(ident) => {
                     Some(ident.name.as_str().to_string())
                 }
                 _ => None,
@@ -294,10 +294,10 @@ impl ClassExtractor {
             match element {
                 ClassElement::PropertyDefinition(prop) => {
                     let name = match &prop.key {
-                        oxc_ast::ast::PropertyKey::StaticIdentifier(ident) => {
+                        oxc::ast::ast::PropertyKey::StaticIdentifier(ident) => {
                             ident.name.as_str().to_string()
                         }
-                        oxc_ast::ast::PropertyKey::StringLiteral(str_lit) => {
+                        oxc::ast::ast::PropertyKey::StringLiteral(str_lit) => {
                             str_lit.value.as_str().to_string()
                         }
                         _ => continue,
@@ -320,10 +320,10 @@ impl ClassExtractor {
                 }
                 ClassElement::MethodDefinition(method) => {
                     let name = match &method.key {
-                        oxc_ast::ast::PropertyKey::StaticIdentifier(ident) => {
+                        oxc::ast::ast::PropertyKey::StaticIdentifier(ident) => {
                             ident.name.as_str().to_string()
                         }
-                        oxc_ast::ast::PropertyKey::StringLiteral(str_lit) => {
+                        oxc::ast::ast::PropertyKey::StringLiteral(str_lit) => {
                             str_lit.value.as_str().to_string()
                         }
                         _ => continue,
@@ -339,7 +339,7 @@ impl ClassExtractor {
                                 .iter()
                                 .map(|param| {
                                     let param_name = match &param.pattern {
-                                        oxc_ast::ast::BindingPattern::BindingIdentifier(ident) => {
+                                        oxc::ast::ast::BindingPattern::BindingIdentifier(ident) => {
                                             ident.name.as_str()
                                         }
                                         _ => "param",
@@ -416,14 +416,14 @@ impl ClassExtractor {
         for statement in &ret.program.body {
             match statement {
                 Statement::ExportDefaultDeclaration(export) => {
-                    if let oxc_ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class) =
+                    if let oxc::ast::ast::ExportDefaultDeclarationKind::ClassDeclaration(class) =
                         &export.declaration
                     {
                         classes.push(self.extract_class(class));
                     }
                 }
                 Statement::ExportNamedDeclaration(export) => {
-                    if let Some(oxc_ast::ast::Declaration::ClassDeclaration(class)) =
+                    if let Some(oxc::ast::ast::Declaration::ClassDeclaration(class)) =
                         &export.declaration
                     {
                         classes.push(self.extract_class(class));

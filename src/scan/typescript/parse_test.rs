@@ -28,6 +28,27 @@ fn parses_basic_ts_and_sets_relative_path() {
 }
 
 #[test]
+fn shared_parse_feeds_scan_and_similarity_extractors() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+    let file = root.join("shared.ts");
+    fs::write(
+        &file,
+        "export interface Item { id: string }\nexport function load() { return 1; }\n",
+    )
+    .unwrap();
+
+    let root_canon = root.canonicalize().unwrap();
+    let (index, similarity) =
+        process_file_with_similarity(&file, &root_canon, FunctionKindsFilter::All).unwrap();
+    assert!(index.functions.iter().any(|function| function.name.as_deref() == Some("load")));
+    assert!(similarity.functions.iter().any(|function| function.name == "load"));
+    assert!(similarity.types.iter().any(|type_def| type_def.name == "Item"));
+    assert_eq!(similarity.path, "shared.ts");
+    assert!(similarity.source.contains("interface Item"));
+}
+
+#[test]
 fn unsupported_extension_errors() {
     let dir = TempDir::new().unwrap();
     let root = dir.path();

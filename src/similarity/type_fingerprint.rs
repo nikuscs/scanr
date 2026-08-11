@@ -1,4 +1,4 @@
-use crate::type_extractor::TypeDefinition;
+use crate::similarity::type_extractor::TypeDefinition;
 use std::collections::HashMap;
 
 /// Generate a fingerprint for a type definition based on its properties
@@ -174,7 +174,7 @@ fn are_fingerprints_similar(fp1: &str, fp2: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::type_extractor::{PropertyDefinition, TypeKind};
+    use crate::similarity::type_extractor::{PropertyDefinition, TypeKind};
 
     #[test]
     fn test_generate_fingerprint() {

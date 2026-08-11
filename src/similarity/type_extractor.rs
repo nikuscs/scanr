@@ -1,13 +1,13 @@
-use oxc_allocator::Allocator;
-use oxc_ast::ast::{
-    Expression, PropertyKey, Statement, TSInterfaceDeclaration, TSPropertySignature, TSType,
-    TSTypeAliasDeclaration, VariableDeclarator,
+use oxc::allocator::Allocator;
+use oxc::ast::ast::{
+    Expression, Program, PropertyKey, Statement, TSInterfaceDeclaration, TSPropertySignature,
+    TSType, TSTypeAliasDeclaration, VariableDeclarator,
 };
-use oxc_parser::Parser;
-use oxc_span::SourceType;
+use oxc::parser::Parser;
+use oxc::span::SourceType;
 use std::collections::HashMap;
 
-use crate::ignore_directive::has_similarity_ignore_directive;
+use crate::similarity::ignore_directive::has_similarity_ignore_directive;
 
 #[derive(Debug, Clone)]
 pub struct TypeDefinition {
@@ -95,9 +95,14 @@ impl TypeExtractor {
             return Err(format!("Parse errors: {}", error_messages.join(", ")));
         }
 
+        Ok(self.extract_types_from_program(&ret.program))
+    }
+
+    /// Extract named types from an already parsed oxc program.
+    pub fn extract_types_from_program(&self, program: &Program<'_>) -> Vec<TypeDefinition> {
         let mut types = Vec::new();
 
-        for stmt in &ret.program.body {
+        for stmt in &program.body {
             match stmt {
                 Statement::TSInterfaceDeclaration(interface) => {
                     if let Some(type_def) = self.extract_interface(interface) {
@@ -112,12 +117,12 @@ impl TypeExtractor {
                 Statement::ExportNamedDeclaration(export) => {
                     if let Some(decl) = &export.declaration {
                         match decl {
-                            oxc_ast::ast::Declaration::TSInterfaceDeclaration(interface) => {
+                            oxc::ast::ast::Declaration::TSInterfaceDeclaration(interface) => {
                                 if let Some(type_def) = self.extract_interface(interface) {
                                     types.push(type_def);
                                 }
                             }
-                            oxc_ast::ast::Declaration::TSTypeAliasDeclaration(type_alias) => {
+                            oxc::ast::ast::Declaration::TSTypeAliasDeclaration(type_alias) => {
                                 if let Some(type_def) = self.extract_type_alias(type_alias) {
                                     types.push(type_def);
                                 }
@@ -130,7 +135,7 @@ impl TypeExtractor {
             }
         }
 
-        Ok(types)
+        types
     }
 
     pub fn extract_type_literals(&self) -> Result<Vec<TypeLiteralDefinition>, String> {
@@ -145,13 +150,21 @@ impl TypeExtractor {
             return Err(format!("Parse errors: {}", error_messages.join(", ")));
         }
 
+        Ok(self.extract_type_literals_from_program(&ret.program))
+    }
+
+    /// Extract type literals from an already parsed oxc program.
+    pub fn extract_type_literals_from_program(
+        &self,
+        program: &Program<'_>,
+    ) -> Vec<TypeLiteralDefinition> {
         let mut type_literals = Vec::new();
 
-        for stmt in &ret.program.body {
+        for stmt in &program.body {
             self.extract_type_literals_from_statement(stmt, &mut type_literals);
         }
 
-        Ok(type_literals)
+        type_literals
     }
 
     fn extract_interface(&self, interface: &TSInterfaceDeclaration) -> Option<TypeDefinition> {
@@ -199,18 +212,18 @@ impl TypeExtractor {
 
     fn extract_interface_properties(
         &self,
-        signatures: &[oxc_ast::ast::TSSignature],
+        signatures: &[oxc::ast::ast::TSSignature],
     ) -> Vec<PropertyDefinition> {
         let mut properties = Vec::new();
 
         for signature in signatures {
             match signature {
-                oxc_ast::ast::TSSignature::TSPropertySignature(prop_sig) => {
+                oxc::ast::ast::TSSignature::TSPropertySignature(prop_sig) => {
                     if let Some(prop_def) = self.extract_property_from_signature(prop_sig) {
                         properties.push(prop_def);
                     }
                 }
-                oxc_ast::ast::TSSignature::TSMethodSignature(method_sig) => {
+                oxc::ast::ast::TSSignature::TSMethodSignature(method_sig) => {
                     if let Some(prop_def) = self.extract_method_from_signature(method_sig) {
                         properties.push(prop_def);
                     }
@@ -257,7 +270,7 @@ impl TypeExtractor {
 
     fn extract_method_from_signature(
         &self,
-        method_sig: &oxc_ast::ast::TSMethodSignature,
+        method_sig: &oxc::ast::ast::TSMethodSignature,
     ) -> Option<PropertyDefinition> {
         let name = match &method_sig.key {
             PropertyKey::StaticIdentifier(ident) => ident.name.as_str().to_string(),
@@ -295,7 +308,7 @@ impl TypeExtractor {
             TSType::TSNullKeyword(_) => "null".to_string(),
             TSType::TSUndefinedKeyword(_) => "undefined".to_string(),
             TSType::TSTypeReference(type_ref) => match &type_ref.type_name {
-                oxc_ast::ast::TSTypeName::IdentifierReference(ident) => {
+                oxc::ast::ast::TSTypeName::IdentifierReference(ident) => {
                     ident.name.as_str().to_string()
                 }
                 _ => "unknown".to_string(),
@@ -315,11 +328,11 @@ impl TypeExtractor {
                 types.join(" & ")
             }
             TSType::TSLiteralType(literal_type) => match &literal_type.literal {
-                oxc_ast::ast::TSLiteral::StringLiteral(str_lit) => {
+                oxc::ast::ast::TSLiteral::StringLiteral(str_lit) => {
                     format!("\"{}\"", str_lit.value.as_str())
                 }
-                oxc_ast::ast::TSLiteral::NumericLiteral(num_lit) => num_lit.value.to_string(),
-                oxc_ast::ast::TSLiteral::BooleanLiteral(bool_lit) => bool_lit.value.to_string(),
+                oxc::ast::ast::TSLiteral::NumericLiteral(num_lit) => num_lit.value.to_string(),
+                oxc::ast::ast::TSLiteral::BooleanLiteral(bool_lit) => bool_lit.value.to_string(),
                 _ => "unknown".to_string(),
             },
             TSType::TSFunctionType(func_type) => {
@@ -332,13 +345,13 @@ impl TypeExtractor {
         }
     }
 
-    fn extract_function_params(&self, params: &oxc_ast::ast::FormalParameters) -> String {
+    fn extract_function_params(&self, params: &oxc::ast::ast::FormalParameters) -> String {
         let param_strings: Vec<String> = params
             .items
             .iter()
             .map(|param| {
                 let param_name = match &param.pattern {
-                    oxc_ast::ast::BindingPattern::BindingIdentifier(ident) => ident.name.as_str(),
+                    oxc::ast::ast::BindingPattern::BindingIdentifier(ident) => ident.name.as_str(),
                     _ => "_",
                 };
 
@@ -357,7 +370,7 @@ impl TypeExtractor {
 
     fn extract_generics(
         &self,
-        type_params: Option<&oxc_allocator::Box<oxc_ast::ast::TSTypeParameterDeclaration>>,
+        type_params: Option<&oxc::allocator::Box<oxc::ast::ast::TSTypeParameterDeclaration>>,
     ) -> Vec<String> {
         if let Some(params) = type_params {
             params.params.iter().map(|param| param.name.name.as_str().to_string()).collect()
@@ -368,13 +381,13 @@ impl TypeExtractor {
 
     fn extract_extends(
         &self,
-        extends: Option<&oxc_allocator::Vec<oxc_ast::ast::TSInterfaceHeritage>>,
+        extends: Option<&oxc::allocator::Vec<oxc::ast::ast::TSInterfaceHeritage>>,
     ) -> Vec<String> {
         if let Some(heritage_clauses) = extends {
             heritage_clauses
                 .iter()
                 .filter_map(|heritage| match &heritage.expression {
-                    oxc_ast::ast::Expression::Identifier(ident) => {
+                    oxc::ast::ast::Expression::Identifier(ident) => {
                         Some(ident.name.as_str().to_string())
                     }
                     _ => None,
@@ -502,16 +515,16 @@ impl TypeExtractor {
         }
     }
 
-    fn get_parameter_name(&self, param: &oxc_ast::ast::FormalParameter) -> Option<String> {
+    fn get_parameter_name(&self, param: &oxc::ast::ast::FormalParameter) -> Option<String> {
         match &param.pattern {
-            oxc_ast::ast::BindingPattern::BindingIdentifier(ident) => Some(ident.name.to_string()),
+            oxc::ast::ast::BindingPattern::BindingIdentifier(ident) => Some(ident.name.to_string()),
             _ => None,
         }
     }
 
     fn get_variable_name(&self, declarator: &VariableDeclarator) -> Option<String> {
         match &declarator.id {
-            oxc_ast::ast::BindingPattern::BindingIdentifier(ident) => Some(ident.name.to_string()),
+            oxc::ast::ast::BindingPattern::BindingIdentifier(ident) => Some(ident.name.to_string()),
             _ => None,
         }
     }

@@ -89,7 +89,7 @@ pub fn scan_file(path: &Path, root: &Path, filter: FunctionKindsFilter) -> Resul
     typescript::parse::process_file(path, root, filter)
 }
 
-fn collect_files(root: &Path, config: &ScanConfig) -> Result<Vec<PathBuf>> {
+pub fn collect_files(root: &Path, config: &ScanConfig) -> Result<Vec<PathBuf>> {
     let extensions: Vec<&str> = if config.extensions.is_empty() {
         DEFAULT_EXTENSIONS.to_vec()
     } else {

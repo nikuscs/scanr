@@ -1,4 +1,4 @@
-use crate::tree::TreeNode;
+use crate::similarity::tree::TreeNode;
 use serde::{Deserialize, Serialize};
 use std::rc::Rc;
 

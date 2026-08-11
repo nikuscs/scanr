@@ -4,6 +4,7 @@ use clap::Parser;
 mod cli;
 mod commands;
 mod scan;
+mod similarity;
 
 use cli::{Cli, Commands};
 

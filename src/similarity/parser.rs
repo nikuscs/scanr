@@ -1,14 +1,14 @@
-use oxc_allocator::Allocator;
-use oxc_ast::ast::{
+use oxc::allocator::Allocator;
+use oxc::ast::ast::{
     BindingPattern, BlockStatement, Class, ClassElement, Declaration, ExportDefaultDeclarationKind,
     Expression, FormalParameter, Function, FunctionBody, Program, PropertyKey, Statement,
     VariableDeclaration, VariableDeclarator,
 };
-use oxc_parser::Parser;
-use oxc_span::SourceType;
+use oxc::parser::Parser;
+use oxc::span::SourceType;
 use std::rc::Rc;
 
-use crate::tree::TreeNode;
+use crate::similarity::tree::TreeNode;
 
 /// Parse TypeScript code and convert to `TreeNode` structure
 ///

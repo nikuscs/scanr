@@ -1,4 +1,4 @@
-use crate::type_extractor::{TypeDefinition, TypeKind};
+use crate::similarity::type_extractor::{TypeDefinition, TypeKind};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
@@ -425,7 +425,7 @@ fn levenshtein_distance(s1: &str, s2: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::type_extractor::{PropertyDefinition, TypeDefinition, TypeKind};
+    use crate::similarity::type_extractor::{PropertyDefinition, TypeDefinition, TypeKind};
 
     fn create_test_type(name: &str, properties: Vec<(&str, &str, bool, bool)>) -> TypeDefinition {
         TypeDefinition {

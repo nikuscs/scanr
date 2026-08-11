@@ -179,11 +179,7 @@ impl StructureComparator {
             }
         } else {
             // 通常モード: 従来のペナルティ
-            if ratio < 0.5 {
-                ratio * ratio
-            } else {
-                0.25 + (ratio * 0.75)
-            }
+            if ratio < 0.5 { ratio * ratio } else { 0.25 + (ratio * 0.75) }
         }
     }
 

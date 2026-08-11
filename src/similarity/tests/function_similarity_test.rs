@@ -1,6 +1,7 @@
-use similarity_core::{
-    find_similar_functions_across_files, find_similar_functions_in_file, TSEDOptions,
+use super::function_extractor::{
+    find_similar_functions_across_files, find_similar_functions_in_file,
 };
+use super::tsed::TSEDOptions;
 
 #[test]
 fn test_similar_functions_within_file() {

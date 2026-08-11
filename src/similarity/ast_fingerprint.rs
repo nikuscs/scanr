@@ -1,10 +1,10 @@
-use oxc_allocator::Allocator;
-use oxc_ast::ast::{
+use oxc::allocator::Allocator;
+use oxc::ast::ast::{
     BinaryExpression, BlockStatement, CallExpression, ClassElement, Expression, FormalParameter,
     FunctionBody, IfStatement, Program, Statement, VariableDeclaration, VariableDeclarator,
 };
-use oxc_parser::Parser;
-use oxc_span::SourceType;
+use oxc::parser::Parser;
+use oxc::span::SourceType;
 use std::collections::HashMap;
 
 /// AST-based fingerprint for function similarity pre-filtering
@@ -182,10 +182,10 @@ impl AstFingerprint {
                 self.count_node("ObjectExpression");
                 for prop in &obj_expr.properties {
                     match &prop {
-                        oxc_ast::ast::ObjectPropertyKind::ObjectProperty(p) => {
+                        oxc::ast::ast::ObjectPropertyKind::ObjectProperty(p) => {
                             self.visit_expression(&p.value);
                         }
-                        oxc_ast::ast::ObjectPropertyKind::SpreadProperty(p) => {
+                        oxc::ast::ast::ObjectPropertyKind::SpreadProperty(p) => {
                             self.visit_expression(&p.argument);
                         }
                     }
@@ -274,14 +274,14 @@ impl AstFingerprint {
     fn visit_binary_expression(&mut self, bin_expr: &BinaryExpression) {
         // Count specific operators
         match bin_expr.operator {
-            oxc_ast::ast::BinaryOperator::Addition => self.count_node("BinaryOp_Add"),
-            oxc_ast::ast::BinaryOperator::Subtraction => self.count_node("BinaryOp_Sub"),
-            oxc_ast::ast::BinaryOperator::Multiplication => self.count_node("BinaryOp_Mul"),
-            oxc_ast::ast::BinaryOperator::Division => self.count_node("BinaryOp_Div"),
-            oxc_ast::ast::BinaryOperator::Equality => self.count_node("BinaryOp_Eq"),
-            oxc_ast::ast::BinaryOperator::Inequality => self.count_node("BinaryOp_Neq"),
-            oxc_ast::ast::BinaryOperator::LessThan => self.count_node("BinaryOp_Lt"),
-            oxc_ast::ast::BinaryOperator::GreaterThan => self.count_node("BinaryOp_Gt"),
+            oxc::ast::ast::BinaryOperator::Addition => self.count_node("BinaryOp_Add"),
+            oxc::ast::ast::BinaryOperator::Subtraction => self.count_node("BinaryOp_Sub"),
+            oxc::ast::ast::BinaryOperator::Multiplication => self.count_node("BinaryOp_Mul"),
+            oxc::ast::ast::BinaryOperator::Division => self.count_node("BinaryOp_Div"),
+            oxc::ast::ast::BinaryOperator::Equality => self.count_node("BinaryOp_Eq"),
+            oxc::ast::ast::BinaryOperator::Inequality => self.count_node("BinaryOp_Neq"),
+            oxc::ast::ast::BinaryOperator::LessThan => self.count_node("BinaryOp_Lt"),
+            oxc::ast::ast::BinaryOperator::GreaterThan => self.count_node("BinaryOp_Gt"),
             _ => self.count_node("BinaryOp_Other"),
         }
         self.visit_expression(&bin_expr.left);

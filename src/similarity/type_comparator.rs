@@ -1,7 +1,7 @@
-use crate::type_extractor::{TypeDefinition, TypeLiteralDefinition};
-use crate::type_normalizer::{
-    calculate_property_similarity, find_property_matches, normalize_type, NormalizationOptions,
-    NormalizedType, PropertyMatch,
+use crate::similarity::type_extractor::{TypeDefinition, TypeLiteralDefinition};
+use crate::similarity::type_normalizer::{
+    NormalizationOptions, NormalizedType, PropertyMatch, calculate_property_similarity,
+    find_property_matches, normalize_type,
 };
 use std::collections::HashSet;
 
@@ -371,7 +371,7 @@ pub fn compare_type_literal_with_type(
     // Convert type literal to TypeDefinition for comparison
     let temp_type_def = TypeDefinition {
         name: type_literal.name.clone(),
-        kind: crate::type_extractor::TypeKind::TypeLiteral,
+        kind: crate::similarity::type_extractor::TypeKind::TypeLiteral,
         properties: type_literal.properties.clone(),
         generics: Vec::new(),
         extends: Vec::new(),
@@ -450,7 +450,7 @@ pub fn find_similar_type_literals_pairs(
                 type_literal1,
                 &TypeDefinition {
                     name: type_literal2.name.clone(),
-                    kind: crate::type_extractor::TypeKind::TypeLiteral,
+                    kind: crate::similarity::type_extractor::TypeKind::TypeLiteral,
                     properties: type_literal2.properties.clone(),
                     generics: Vec::new(),
                     extends: Vec::new(),
@@ -477,7 +477,7 @@ pub fn find_similar_type_literals_pairs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::type_extractor::{PropertyDefinition, TypeDefinition, TypeKind};
+    use crate::similarity::type_extractor::{PropertyDefinition, TypeDefinition, TypeKind};
 
     fn create_test_type(name: &str, properties: Vec<(&str, &str, bool, bool)>) -> TypeDefinition {
         TypeDefinition {

@@ -1,9 +1,9 @@
-use oxc_ast::ast::*;
-use oxc_span::Span;
+use oxc::ast::ast::*;
+use oxc::span::Span;
 
-use crate::ignore_directive::has_similarity_ignore_directive;
-use crate::parser::parse_and_convert_to_tree;
-use crate::tsed::{calculate_tsed, TSEDOptions};
+use crate::similarity::ignore_directive::has_similarity_ignore_directive;
+use crate::similarity::parser::parse_and_convert_to_tree;
+use crate::similarity::tsed::{TSEDOptions, calculate_tsed};
 
 type CrossFileSimilarityResult = Vec<(String, SimilarityResult, String)>;
 
@@ -73,9 +73,9 @@ pub fn extract_functions(
     filename: &str,
     source_text: &str,
 ) -> Result<Vec<FunctionDefinition>, String> {
-    use oxc_allocator::Allocator;
-    use oxc_parser::Parser;
-    use oxc_span::SourceType;
+    use oxc::allocator::Allocator;
+    use oxc::parser::Parser;
+    use oxc::span::SourceType;
 
     let allocator = Allocator::default();
     let source_type = SourceType::from_path(filename).unwrap_or(SourceType::tsx());
@@ -88,6 +88,14 @@ pub fn extract_functions(
         return Err(format!("Parse errors: {}", error_messages.join(", ")));
     }
 
+    Ok(extract_functions_from_program(source_text, &ret.program))
+}
+
+/// Extract all functions from an already parsed oxc program.
+pub fn extract_functions_from_program(
+    source_text: &str,
+    program: &Program<'_>,
+) -> Vec<FunctionDefinition> {
     let mut functions = Vec::new();
     let mut context = ExtractionContext {
         functions: &mut functions,
@@ -96,8 +104,8 @@ pub fn extract_functions(
         parent_function: None,
     };
 
-    extract_from_program(&ret.program, &mut context);
-    Ok(functions)
+    extract_from_program(program, &mut context);
+    functions
 }
 
 struct ExtractionContext<'a> {
@@ -403,7 +411,7 @@ fn extract_from_declaration(decl: &Declaration, ctx: &mut ExtractionContext) {
     }
 }
 
-fn extract_parameters(params: &oxc_ast::ast::FormalParameters) -> Vec<String> {
+fn extract_parameters(params: &oxc::ast::ast::FormalParameters) -> Vec<String> {
     params
         .items
         .iter()

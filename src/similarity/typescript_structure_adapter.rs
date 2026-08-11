@@ -1,9 +1,11 @@
-use crate::class_extractor::{ClassDefinition, ClassMethod, ClassProperty};
-use crate::structure_comparator::{
+use crate::similarity::class_extractor::{ClassDefinition, ClassMethod, ClassProperty};
+use crate::similarity::structure_comparator::{
     ComparisonOptions, SourceLocation, Structure, StructureComparator, StructureComparisonResult,
     StructureIdentifier, StructureKind, StructureMember, StructureMetadata,
 };
-use crate::type_extractor::{PropertyDefinition, TypeDefinition, TypeKind, TypeLiteralDefinition};
+use crate::similarity::type_extractor::{
+    PropertyDefinition, TypeDefinition, TypeKind, TypeLiteralDefinition,
+};
 
 /// TypeScriptの型定義を一般構造に変換
 impl From<TypeDefinition> for Structure {
@@ -265,7 +267,7 @@ impl BatchComparator {
 
     /// 類似構造を検出
     pub fn find_similar_structures(&mut self, threshold: f64) -> Vec<(Structure, Structure, f64)> {
-        use crate::structure_comparator::should_compare_fingerprints;
+        use crate::similarity::structure_comparator::should_compare_fingerprints;
 
         let mut results = Vec::new();
 

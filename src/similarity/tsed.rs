@@ -1,5 +1,7 @@
-use crate::apted::{compute_edit_distance, compute_edit_distance_with_cutoff, APTEDOptions};
-use crate::tree::TreeNode;
+use crate::similarity::apted::{
+    APTEDOptions, compute_edit_distance, compute_edit_distance_with_cutoff,
+};
+use crate::similarity::tree::TreeNode;
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -212,7 +214,7 @@ pub fn calculate_tsed_from_code(
     filename2: &str,
     options: &TSEDOptions,
 ) -> Result<f64, String> {
-    use crate::parser::parse_and_convert_to_tree;
+    use crate::similarity::parser::parse_and_convert_to_tree;
 
     let tree1 = parse_and_convert_to_tree(filename1, code1)?;
     let tree2 = parse_and_convert_to_tree(filename2, code2)?;

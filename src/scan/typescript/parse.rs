@@ -8,8 +8,39 @@ use oxc::span::SourceType;
 
 use super::extract;
 use crate::scan::types::{FileIndex, FunctionKindsFilter};
+use crate::similarity::function_extractor::{FunctionDefinition, extract_functions_from_program};
+use crate::similarity::type_extractor::{TypeDefinition, TypeExtractor, TypeLiteralDefinition};
+
+#[allow(dead_code)]
+pub struct SimilarityFile {
+    pub path: String,
+    pub source: String,
+    pub functions: Vec<FunctionDefinition>,
+    pub types: Vec<TypeDefinition>,
+    pub type_literals: Vec<TypeLiteralDefinition>,
+}
 
 pub fn process_file(path: &Path, root: &Path, filter: FunctionKindsFilter) -> Result<FileIndex> {
+    process_file_inner(path, root, filter, false).map(|(index, _)| index)
+}
+
+#[allow(dead_code)]
+pub fn process_file_with_similarity(
+    path: &Path,
+    root: &Path,
+    filter: FunctionKindsFilter,
+) -> Result<(FileIndex, SimilarityFile)> {
+    let (index, similarity) = process_file_inner(path, root, filter, true)?;
+    let similarity = similarity.context("similarity extraction was not produced")?;
+    Ok((index, similarity))
+}
+
+fn process_file_inner(
+    path: &Path,
+    root: &Path,
+    filter: FunctionKindsFilter,
+    include_similarity: bool,
+) -> Result<(FileIndex, Option<SimilarityFile>)> {
     let source = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read {}", path.display()))?;
 
@@ -21,36 +52,51 @@ pub fn process_file(path: &Path, root: &Path, filter: FunctionKindsFilter) -> Re
         canonical_path.strip_prefix(root).unwrap_or(&canonical_path).to_string_lossy().to_string();
 
     let allocator = Allocator::default();
-
     let parser_ret =
         Parser::new(&allocator, &source, source_type).with_options(ParseOptions::default()).parse();
-
     let parse_errors = parser_ret.errors.len();
 
     if parser_ret.panicked {
-        return Ok(FileIndex {
-            path: rel_path,
+        let index = FileIndex {
+            path: rel_path.clone(),
             functions: Vec::new(),
             bindings: Vec::new(),
             exports: Vec::new(),
             violations: Vec::new(),
             parse_errors,
+        };
+        let similarity = include_similarity.then(|| SimilarityFile {
+            path: rel_path,
+            source,
+            functions: Vec::new(),
+            types: Vec::new(),
+            type_literals: Vec::new(),
         });
+        return Ok((index, similarity));
     }
 
-    let sem_ret = SemanticBuilder::new().build(&parser_ret.program);
-    let semantic = sem_ret.semantic;
-
+    let semantic = SemanticBuilder::new().build(&parser_ret.program).semantic;
     let result = extract::extract_file(&parser_ret.program, &semantic, &source, filter);
+    let similarity = include_similarity.then(|| {
+        let type_extractor = TypeExtractor::new(source.clone(), rel_path.clone());
+        SimilarityFile {
+            path: rel_path.clone(),
+            functions: extract_functions_from_program(&source, &parser_ret.program),
+            types: type_extractor.extract_types_from_program(&parser_ret.program),
+            type_literals: type_extractor.extract_type_literals_from_program(&parser_ret.program),
+            source: source.clone(),
+        }
+    });
 
-    Ok(FileIndex {
+    let index = FileIndex {
         path: rel_path,
         functions: result.functions,
         bindings: result.bindings,
         exports: result.exports,
         violations: Vec::new(),
         parse_errors,
-    })
+    };
+    Ok((index, similarity))
 }
 
 #[cfg(test)]

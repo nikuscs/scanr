@@ -1,4 +1,4 @@
-use crate::tree::TreeNode;
+use crate::similarity::tree::TreeNode;
 use std::collections::HashMap;
 use std::rc::Rc;
 

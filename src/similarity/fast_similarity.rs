@@ -1,7 +1,8 @@
-use crate::ast_fingerprint::AstFingerprint;
-use crate::compare_functions;
-use crate::function_extractor::{extract_functions, FunctionDefinition, SimilarityResult};
-use crate::tsed::TSEDOptions;
+use crate::similarity::ast_fingerprint::AstFingerprint;
+use crate::similarity::function_extractor::{
+    FunctionDefinition, SimilarityResult, compare_functions, extract_functions,
+};
+use crate::similarity::tsed::TSEDOptions;
 
 /// Fast similarity options
 #[derive(Debug, Clone)]

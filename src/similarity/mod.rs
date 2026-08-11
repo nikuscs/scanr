@@ -1,3 +1,7 @@
+#![allow(dead_code)]
+#![allow(clippy::all, clippy::pedantic, clippy::nursery)]
+#![allow(clippy::print_stdout, clippy::print_stderr)]
+
 // Vendored from github.com/mizchi/similarity, similarity-core 0.5.2 (MIT).
 // Copyright (c) 2024 mizchi. See LICENSE in this directory.
 
@@ -19,3 +23,7 @@ pub mod type_fingerprint;
 pub mod type_normalizer;
 pub mod typescript_structure_adapter;
 pub mod unified_type_comparator;
+
+#[cfg(test)]
+#[path = "tests/function_similarity_test.rs"]
+mod function_similarity_test;

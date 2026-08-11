@@ -1,9 +1,9 @@
-use crate::structure_comparator::{ComparisonOptions, Structure};
-use crate::type_comparator::{
-    compare_type_literal_with_type, compare_types, TypeComparisonOptions, TypeComparisonResult,
+use crate::similarity::structure_comparator::{ComparisonOptions, Structure};
+use crate::similarity::type_comparator::{
+    TypeComparisonOptions, TypeComparisonResult, compare_type_literal_with_type, compare_types,
 };
-use crate::type_extractor::{TypeDefinition, TypeKind, TypeLiteralDefinition};
-use crate::typescript_structure_adapter::TypeScriptStructureComparator;
+use crate::similarity::type_extractor::{TypeDefinition, TypeKind, TypeLiteralDefinition};
+use crate::similarity::typescript_structure_adapter::TypeScriptStructureComparator;
 
 #[derive(Debug, Clone)]
 pub enum UnifiedType {
@@ -225,23 +225,25 @@ pub fn find_similar_unified_types_structured(
                     matched_properties: result
                         .member_matches
                         .iter()
-                        .map(|m| crate::type_comparator::MatchedProperty {
+                        .map(|m| crate::similarity::type_comparator::MatchedProperty {
                             prop1: m.member1.clone(),
                             prop2: m.member2.clone(),
                             similarity: m.similarity,
                         })
                         .collect(),
-                    differences: crate::type_comparator::TypeDifferences {
+                    differences: crate::similarity::type_comparator::TypeDifferences {
                         missing_properties: result.differences.missing_members.clone(),
                         extra_properties: result.differences.extra_members.clone(),
                         type_mismatches: result
                             .differences
                             .type_mismatches
                             .iter()
-                            .map(|(name, t1, t2)| crate::type_comparator::TypeMismatch {
-                                property: name.clone(),
-                                type1: t1.clone(),
-                                type2: t2.clone(),
+                            .map(|(name, t1, t2)| {
+                                crate::similarity::type_comparator::TypeMismatch {
+                                    property: name.clone(),
+                                    type1: t1.clone(),
+                                    type2: t2.clone(),
+                                }
                             })
                             .collect(),
                         optionality_differences: Vec::new(),
