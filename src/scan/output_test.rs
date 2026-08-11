@@ -1,6 +1,7 @@
 use super::*;
 use crate::scan::types::{
     BindingInfo, BindingKind, ExportInfo, FileIndex, FunctionInfo, FunctionKind, ScanResult, Stats,
+    Violation,
 };
 
 fn scan_result_example() -> ScanResult {
@@ -47,6 +48,7 @@ fn scan_result_example() -> ScanResult {
             col: 1,
         }],
         exports: vec![],
+        violations: vec![],
         parse_errors: 0,
     };
     let fi2 = FileIndex {
@@ -63,6 +65,7 @@ fn scan_result_example() -> ScanResult {
         }],
         bindings: vec![],
         exports: vec![],
+        violations: vec![],
         parse_errors: 0,
     };
     ScanResult {
@@ -127,6 +130,7 @@ fn folders_mode_uses_dot_names() {
         ],
         bindings: vec![],
         exports: vec![],
+        violations: vec![],
         parse_errors: 0,
     };
     let r = ScanResult {
@@ -180,6 +184,7 @@ fn dot_names_for_nested_methods() {
         ],
         bindings: vec![],
         exports: vec![],
+        violations: vec![],
         parse_errors: 0,
     };
     let r = ScanResult {
@@ -234,6 +239,7 @@ fn dot_names_picks_nearest_parent() {
         ],
         bindings: vec![],
         exports: vec![],
+        violations: vec![],
         parse_errors: 0,
     };
     let names = FilesOutput::from(&ScanResult {
@@ -285,6 +291,7 @@ fn write_result_emits_valid_json_all_modes() {
             col: 1,
         }],
         exports: vec![],
+        violations: vec![],
         parse_errors: 0,
     };
     let r = ScanResult {
@@ -303,6 +310,26 @@ fn write_result_emits_valid_json_all_modes() {
 }
 
 #[test]
+fn compact_and_verbose_outputs_include_violations() {
+    let mut result = scan_result_example();
+    result.file_indices[0].violations.push(Violation {
+        rule: "demo".into(),
+        count: 1,
+        details: vec!["foo".into()],
+    });
+
+    let mut compact = Vec::new();
+    write_result(&result, OutputMode::Compact, &mut compact).unwrap();
+    let compact: serde_json::Value = serde_json::from_slice(&compact).unwrap();
+    assert_eq!(compact["viol"][0][1], "demo");
+
+    let mut verbose = Vec::new();
+    write_result(&result, OutputMode::Verbose, &mut verbose).unwrap();
+    let verbose: serde_json::Value = serde_json::from_slice(&verbose).unwrap();
+    assert_eq!(verbose["violations"][0]["rule"], "demo");
+}
+
+#[test]
 fn verbose_output_includes_exports_and_folder_none_parent_path() {
     let fi = FileIndex {
         path: String::new(),
@@ -318,6 +345,7 @@ fn verbose_output_includes_exports_and_folder_none_parent_path() {
         }],
         bindings: vec![],
         exports: vec![ExportInfo { name: "default".into(), kind_code: 2 }],
+        violations: vec![],
         parse_errors: 0,
     };
     let r = ScanResult {

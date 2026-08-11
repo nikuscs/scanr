@@ -115,12 +115,20 @@ pub const EXPORT_DEFAULT: u8 = 2;
 #[allow(dead_code)]
 pub const EXPORT_REEXPORT: u8 = 3;
 
+#[derive(Debug, Clone, Serialize)]
+pub struct Violation {
+    pub rule: String,
+    pub count: usize,
+    pub details: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct FileIndex {
     pub path: String,
     pub functions: Vec<FunctionInfo>,
     pub bindings: Vec<BindingInfo>,
     pub exports: Vec<ExportInfo>,
+    pub violations: Vec<Violation>,
     pub parse_errors: usize,
 }
 

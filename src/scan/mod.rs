@@ -1,4 +1,5 @@
 pub mod output;
+pub mod rules;
 pub mod types;
 pub mod typescript;
 

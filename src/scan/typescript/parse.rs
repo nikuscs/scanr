@@ -33,7 +33,7 @@ pub fn process_file(path: &Path, root: &Path, filter: FunctionKindsFilter) -> Re
             functions: Vec::new(),
             bindings: Vec::new(),
             exports: Vec::new(),
-
+            violations: Vec::new(),
             parse_errors,
         });
     }
@@ -48,6 +48,7 @@ pub fn process_file(path: &Path, root: &Path, filter: FunctionKindsFilter) -> Re
         functions: result.functions,
         bindings: result.bindings,
         exports: result.exports,
+        violations: Vec::new(),
         parse_errors,
     })
 }

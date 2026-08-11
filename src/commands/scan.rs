@@ -9,7 +9,7 @@ use crate::scan::{self, ScanConfig};
 pub fn run(args: &ScanArgs) -> Result<()> {
     let root = std::path::Path::new(&args.root);
 
-    let result = if let Some(file_path) = &args.file {
+    let mut result = if let Some(file_path) = &args.file {
         // Single file mode
         let path = std::path::Path::new(file_path);
         let canonical_root = root.canonicalize().unwrap_or_else(|_| root.to_path_buf());
@@ -37,6 +37,10 @@ pub fn run(args: &ScanArgs) -> Result<()> {
         };
         scan::scan_directory(root, &config)?
     };
+
+    for index in &mut result.file_indices {
+        crate::scan::rules::run_rules(&args.rules, index);
+    }
 
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();

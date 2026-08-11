@@ -40,6 +40,9 @@ struct CompactOutput {
     b: Vec<(String, u32, u32, String, String, usize)>,
     /// Exports: `[file, name, kind_code]`
     x: Vec<(String, String, u8)>,
+    /// Violations: [file, rule, count, details]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    viol: Vec<(String, String, usize, Vec<String>)>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     err: Vec<String>,
 }
@@ -49,9 +52,11 @@ impl From<&ScanResult> for CompactOutput {
         let total_functions = r.file_indices.iter().map(|fi| fi.functions.len()).sum();
         let total_bindings = r.file_indices.iter().map(|fi| fi.bindings.len()).sum();
         let total_exports = r.file_indices.iter().map(|fi| fi.exports.len()).sum();
+        let total_violations = r.file_indices.iter().map(|fi| fi.violations.len()).sum();
         let mut f = Vec::with_capacity(total_functions);
         let mut b = Vec::with_capacity(total_bindings);
         let mut x = Vec::with_capacity(total_exports);
+        let mut viol = Vec::with_capacity(total_violations);
 
         for fi in &r.file_indices {
             for func in &fi.functions {
@@ -77,9 +82,17 @@ impl From<&ScanResult> for CompactOutput {
             for exp in &fi.exports {
                 x.push((fi.path.clone(), exp.name.clone(), exp.kind_code));
             }
+            for violation in &fi.violations {
+                viol.push((
+                    fi.path.clone(),
+                    violation.rule.clone(),
+                    violation.count,
+                    violation.details.clone(),
+                ));
+            }
         }
 
-        Self { ver: r.ver, stats: r.stats.clone(), f, b, x, err: r.errors.clone() }
+        Self { ver: r.ver, stats: r.stats.clone(), f, b, x, viol, err: r.errors.clone() }
     }
 }
 
@@ -92,6 +105,8 @@ struct VerboseOutput {
     functions: Vec<VerboseFunction>,
     bindings: Vec<VerboseBinding>,
     exports: Vec<VerboseExport>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    violations: Vec<VerboseViolation>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     errors: Vec<String>,
 }
@@ -139,14 +154,24 @@ struct VerboseExport {
     kind_code: u8,
 }
 
+#[derive(Serialize)]
+struct VerboseViolation {
+    file: String,
+    rule: String,
+    count: usize,
+    details: Vec<String>,
+}
+
 impl From<&ScanResult> for VerboseOutput {
     fn from(r: &ScanResult) -> Self {
         let total_functions = r.file_indices.iter().map(|fi| fi.functions.len()).sum();
         let total_bindings = r.file_indices.iter().map(|fi| fi.bindings.len()).sum();
         let total_exports = r.file_indices.iter().map(|fi| fi.exports.len()).sum();
+        let total_violations = r.file_indices.iter().map(|fi| fi.violations.len()).sum();
         let mut functions = Vec::with_capacity(total_functions);
         let mut bindings = Vec::with_capacity(total_bindings);
         let mut exports = Vec::with_capacity(total_exports);
+        let mut violations = Vec::with_capacity(total_violations);
 
         for fi in &r.file_indices {
             for func in &fi.functions {
@@ -180,6 +205,14 @@ impl From<&ScanResult> for VerboseOutput {
                     kind_code: exp.kind_code,
                 });
             }
+            for violation in &fi.violations {
+                violations.push(VerboseViolation {
+                    file: fi.path.clone(),
+                    rule: violation.rule.clone(),
+                    count: violation.count,
+                    details: violation.details.clone(),
+                });
+            }
         }
 
         Self {
@@ -189,6 +222,7 @@ impl From<&ScanResult> for VerboseOutput {
             functions,
             bindings,
             exports,
+            violations,
             errors: r.errors.clone(),
         }
     }

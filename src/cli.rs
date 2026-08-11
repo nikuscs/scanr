@@ -104,6 +104,10 @@ pub struct ScanArgs {
     #[arg(long, default_value = "all")]
     pub function_kinds: crate::scan::types::FunctionKindsFilter,
 
+    /// Rules to run (comma-separated; default: all)
+    #[arg(long, value_delimiter = ',')]
+    pub rules: Vec<String>,
+
     /// Scan a single file instead of directory
     #[arg(long)]
     pub file: Option<String>,
