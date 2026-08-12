@@ -39,6 +39,44 @@ fn function_kind_labels_and_codes_cover_all() {
 }
 
 #[test]
+fn function_roles_distinguish_tsx_components_hooks_locals_and_helpers() {
+    let make = |name: &str, parent: Option<&str>, kind, contains_jsx| FunctionInfo {
+        name: Some(name.into()),
+        parent: parent.map(str::to_string),
+        captures: vec![],
+        low_value_reason: None,
+        kind,
+        exported: false,
+        is_async: false,
+        is_generator: false,
+        content: if contains_jsx { FunctionContent::Jsx } else { FunctionContent::Plain },
+        line: 1,
+        col: 1,
+        line_end: 1,
+    };
+    assert_eq!(
+        make("Card", None, FunctionKind::Declaration, true).role("view.tsx"),
+        FunctionRole::ReactComponent
+    );
+    assert_eq!(
+        make("useCard", None, FunctionKind::Declaration, false).role("view.ts"),
+        FunctionRole::ReactHook
+    );
+    assert_eq!(
+        make("handleClick", Some("Card"), FunctionKind::Declaration, false).role("view.tsx"),
+        FunctionRole::ComponentLocal
+    );
+    assert_eq!(
+        make("formatValue", None, FunctionKind::Declaration, false).role("view.tsx"),
+        FunctionRole::Helper
+    );
+    assert_eq!(
+        make("run", None, FunctionKind::ClassMethod, false).role("service.ts"),
+        FunctionRole::ClassMethod
+    );
+}
+
+#[test]
 fn line_index_bounds() {
     let src = "a\n\nccc\n";
     let li = LineIndex::new(src);

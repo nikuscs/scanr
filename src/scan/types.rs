@@ -20,6 +20,28 @@ pub enum FunctionKind {
     Constructor,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FunctionRole {
+    ReactComponent,
+    ReactHook,
+    ComponentLocal,
+    ClassMethod,
+    Helper,
+}
+
+impl FunctionRole {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::ReactComponent => "reactComponent",
+            Self::ReactHook => "reactHook",
+            Self::ComponentLocal => "componentLocal",
+            Self::ClassMethod => "classMethod",
+            Self::Helper => "helper",
+        }
+    }
+}
+
 impl FunctionKind {
     pub const fn code(self) -> &'static str {
         match self {
@@ -80,6 +102,14 @@ impl BindingKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FunctionContent {
+    #[default]
+    Plain,
+    Jsx,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionInfo {
@@ -92,8 +122,62 @@ pub struct FunctionInfo {
     pub exported: bool,
     pub is_async: bool,
     pub is_generator: bool,
+    pub content: FunctionContent,
     pub line: u32,
     pub col: u32,
+    pub line_end: u32,
+}
+
+impl FunctionInfo {
+    pub const fn has_jsx(&self) -> bool {
+        matches!(self.content, FunctionContent::Jsx)
+    }
+
+    pub fn role(&self, path: &str) -> FunctionRole {
+        if matches!(
+            self.kind,
+            FunctionKind::ClassMethod
+                | FunctionKind::Getter
+                | FunctionKind::Setter
+                | FunctionKind::Constructor
+        ) {
+            return FunctionRole::ClassMethod;
+        }
+        let name = self.name.as_deref().unwrap_or_default();
+        if name
+            .strip_prefix("use")
+            .is_some_and(|suffix| suffix.chars().next().is_some_and(char::is_uppercase))
+        {
+            return FunctionRole::ReactHook;
+        }
+        let is_tsx = path.to_ascii_lowercase().ends_with(".tsx");
+        if is_tsx
+            && self.parent.as_deref().is_some_and(|parent| {
+                parent
+                    .split('.')
+                    .next()
+                    .and_then(|name| name.chars().next())
+                    .is_some_and(char::is_uppercase)
+            })
+        {
+            return FunctionRole::ComponentLocal;
+        }
+        if is_tsx
+            && self.has_jsx()
+            && self.parent.is_none()
+            && name.chars().next().is_some_and(char::is_uppercase)
+        {
+            return FunctionRole::ReactComponent;
+        }
+        FunctionRole::Helper
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ClassInfo {
+    pub name: String,
+    pub exported: bool,
+    pub line: u32,
     pub line_end: u32,
 }
 
@@ -130,10 +214,12 @@ pub struct Violation {
 pub struct FileIndex {
     pub path: String,
     pub functions: Vec<FunctionInfo>,
+    pub classes: Vec<ClassInfo>,
     pub bindings: Vec<BindingInfo>,
     pub exports: Vec<ExportInfo>,
     pub violations: Vec<Violation>,
     pub parse_errors: usize,
+    pub slop: crate::slop::types::FileFacts,
 }
 
 #[derive(Debug, Clone, Serialize)]

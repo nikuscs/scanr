@@ -1,10 +1,11 @@
 use std::collections::{BTreeSet, HashSet};
 
 use oxc::ast::ast::{
-    ArrowFunctionBody, ArrowFunctionExpression, BindingPattern, Declaration, ExportDeclaration,
-    ExportDefaultDeclaration, ExportDefaultDeclarationKind, ExportNamedDeclaration, Expression,
-    FormalParameters, Function, FunctionBody, FunctionType, MethodDefinition, MethodDefinitionKind,
-    ObjectProperty, PropertyKind, Statement, VariableDeclarator,
+    ArrowFunctionBody, ArrowFunctionExpression, BindingPattern, CallExpression, Class, Declaration,
+    ExportDeclaration, ExportDefaultDeclaration, ExportDefaultDeclarationKind,
+    ExportNamedDeclaration, Expression, FormalParameters, Function, FunctionBody, FunctionType,
+    JSXElement, JSXFragment, MethodDefinition, MethodDefinitionKind, ObjectProperty, PropertyKind,
+    Statement, VariableDeclarator,
 };
 use oxc::ast_visit::{self, Visit};
 use oxc::semantic::Semantic;
@@ -12,12 +13,13 @@ use oxc::syntax::scope::{ScopeFlags, ScopeId};
 use oxc::syntax::symbol::SymbolFlags;
 
 use crate::scan::types::{
-    BindingInfo, BindingKind, EXPORT_DEFAULT, EXPORT_NAMED, ExportInfo, FunctionInfo, FunctionKind,
-    FunctionKindsFilter, LineIndex,
+    BindingInfo, BindingKind, ClassInfo, EXPORT_DEFAULT, EXPORT_NAMED, ExportInfo, FunctionContent,
+    FunctionInfo, FunctionKind, FunctionKindsFilter, LineIndex,
 };
 
 pub struct ExtractionResult {
     pub functions: Vec<FunctionInfo>,
+    pub classes: Vec<ClassInfo>,
     pub bindings: Vec<BindingInfo>,
     pub exports: Vec<ExportInfo>,
 }
@@ -32,6 +34,7 @@ pub fn extract_file(
 
     let mut collector = Collector {
         functions: Vec::new(),
+        classes: Vec::new(),
         exported_names: HashSet::new(),
         exports: Vec::new(),
         lines: &lines,
@@ -45,7 +48,7 @@ pub fn extract_file(
     let bindings = extract_bindings(semantic, &lines, &collector.exported_names);
     let functions = enrich_functions(collector.functions, semantic);
 
-    ExtractionResult { functions, bindings, exports: collector.exports }
+    ExtractionResult { functions, classes: collector.classes, bindings, exports: collector.exports }
 }
 
 struct FunctionRecord {
@@ -56,6 +59,7 @@ struct FunctionRecord {
 
 struct Collector<'s> {
     functions: Vec<FunctionRecord>,
+    classes: Vec<ClassInfo>,
     exported_names: HashSet<String>,
     exports: Vec<ExportInfo>,
     lines: &'s LineIndex,
@@ -94,6 +98,7 @@ impl Collector<'_> {
                 exported,
                 is_async,
                 is_generator,
+                content: FunctionContent::Plain,
                 line: self.lines.line(span_start),
                 col: self.lines.col(span_start),
                 line_end: self.lines.line(span_end),
@@ -110,6 +115,31 @@ impl Collector<'_> {
 }
 
 impl<'a> Visit<'a> for Collector<'_> {
+    fn visit_jsx_element(&mut self, it: &JSXElement<'a>) {
+        self.mark_innermost_function_jsx(it.span.start, it.span.end);
+        ast_visit::walk::walk_jsx_element(self, it);
+    }
+
+    fn visit_jsx_fragment(&mut self, it: &JSXFragment<'a>) {
+        self.mark_innermost_function_jsx(it.span.start, it.span.end);
+        ast_visit::walk::walk_jsx_fragment(self, it);
+    }
+
+    fn visit_class(&mut self, it: &Class<'a>) {
+        if let Some(id) = &it.id {
+            let name = id.name.to_string();
+            self.classes.push(ClassInfo {
+                exported: self.in_export
+                    || self.in_default_export
+                    || self.exported_names.contains(&name),
+                name,
+                line: self.lines.line(it.span.start),
+                line_end: self.lines.line(it.span.end),
+            });
+        }
+        ast_visit::walk::walk_class(self, it);
+    }
+
     fn visit_export_named_declaration(&mut self, it: &ExportNamedDeclaration<'a>) {
         // `export { foo, bar }` — specifiers
         for spec in &it.specifiers {
@@ -265,6 +295,17 @@ impl<'a> Visit<'a> for Collector<'_> {
 }
 
 impl Collector<'_> {
+    fn mark_innermost_function_jsx(&mut self, span_start: u32, span_end: u32) {
+        if let Some(record) = self
+            .functions
+            .iter_mut()
+            .rev()
+            .find(|record| record.span_start <= span_start && record.span_end >= span_end)
+        {
+            record.info.content = FunctionContent::Jsx;
+        }
+    }
+
     fn collect_declaration_names(&mut self, decl: &Declaration<'_>, kind_code: u8) {
         match decl {
             Declaration::FunctionDeclaration(f) => {
@@ -306,9 +347,14 @@ fn classify_function_body(body: &FunctionBody<'_>) -> Option<&'static str> {
             statement.argument.as_ref().map_or(Some("empty_return"), classify_expression)
         }
         [Statement::ExpressionStatement(statement)] => match &statement.expression {
-            Expression::CallExpression(_) => Some("side_effect_wrapper"),
+            Expression::CallExpression(call) if is_direct_passthrough_call(call) => {
+                Some("side_effect_wrapper")
+            }
             Expression::AwaitExpression(await_expression)
-                if matches!(&await_expression.argument, Expression::CallExpression(_)) =>
+                if matches!(
+                    &await_expression.argument,
+                    Expression::CallExpression(call) if is_direct_passthrough_call(call)
+                ) =>
             {
                 Some("side_effect_wrapper")
             }
@@ -326,17 +372,57 @@ fn classify_expression(expression: &Expression<'_>) -> Option<&'static str> {
         | Expression::BigIntLiteral(_)
         | Expression::StringLiteral(_) => Some("constant_return"),
         Expression::Identifier(_) => Some("identity_return"),
-        Expression::ComputedMemberExpression(_)
-        | Expression::StaticMemberExpression(_)
-        | Expression::PrivateFieldExpression(_) => Some("property_return"),
-        Expression::CallExpression(_) | Expression::NewExpression(_) => Some("thin_wrapper"),
+        Expression::StaticMemberExpression(member) if is_direct_reference(&member.object) => {
+            Some("property_return")
+        }
+        Expression::PrivateFieldExpression(member) if is_direct_reference(&member.object) => {
+            Some("property_return")
+        }
+        Expression::CallExpression(call) if is_direct_passthrough_call(call) => {
+            Some("thin_wrapper")
+        }
         Expression::AwaitExpression(await_expression)
-            if matches!(&await_expression.argument, Expression::CallExpression(_)) =>
+            if matches!(
+                &await_expression.argument,
+                Expression::CallExpression(call) if is_direct_passthrough_call(call)
+            ) =>
         {
             Some("thin_wrapper")
         }
         _ => None,
     }
+}
+
+fn is_direct_passthrough_call(call: &CallExpression<'_>) -> bool {
+    is_direct_reference(&call.callee)
+        && call
+            .arguments
+            .iter()
+            .all(|argument| argument.as_expression().is_some_and(is_passthrough_argument))
+}
+
+fn is_direct_reference(expression: &Expression<'_>) -> bool {
+    match expression {
+        Expression::Identifier(_) => true,
+        Expression::StaticMemberExpression(member) => is_direct_reference(&member.object),
+        Expression::PrivateFieldExpression(member) => is_direct_reference(&member.object),
+        _ => false,
+    }
+}
+
+fn is_passthrough_argument(expression: &Expression<'_>) -> bool {
+    matches!(
+        expression,
+        Expression::BooleanLiteral(_)
+            | Expression::NullLiteral(_)
+            | Expression::NumericLiteral(_)
+            | Expression::BigIntLiteral(_)
+            | Expression::StringLiteral(_)
+            | Expression::Identifier(_)
+    ) || matches!(
+        expression,
+        Expression::StaticMemberExpression(member) if is_direct_reference(&member.object)
+    )
 }
 
 fn enrich_functions(

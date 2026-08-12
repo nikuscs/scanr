@@ -46,6 +46,9 @@ fn shared_parse_feeds_scan_and_similarity_extractors() {
     assert!(similarity.types.iter().any(|type_def| type_def.name == "Item"));
     assert_eq!(similarity.path, "shared.ts");
     assert!(similarity.source.contains("interface Item"));
+    assert!(similarity.slop.analysis_complete);
+    assert!(similarity.slop.models.iter().any(|model| model.key.name == "Item"));
+    assert!(similarity.slop.declarations.iter().any(|declaration| declaration.key.name == "load"));
 }
 
 #[test]
@@ -71,6 +74,7 @@ fn parse_records_syntax_errors() {
     assert_eq!(fi.path, "bad.ts");
     assert!(fi.parse_errors > 0);
     assert!(fi.functions.is_empty());
+    assert!(!fi.slop.analysis_complete);
 }
 
 #[test]

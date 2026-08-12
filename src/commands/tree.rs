@@ -1,16 +1,18 @@
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use rayon::prelude::*;
+use serde::Serialize;
 
-use crate::commands::dupes::function_duplicate_groups;
+use crate::cli::HealthSort;
+use crate::commands::dupes::{FunctionDuplicateKey, function_duplicate_groups};
 use crate::scan::rules::{hoistable_function, is_test_path, low_value_function};
-use crate::scan::types::{FunctionInfo, FunctionKindsFilter};
-use crate::scan::typescript::parse::process_file_with_similarity;
+use crate::scan::types::{FileIndex, FunctionInfo, FunctionKindsFilter};
+use crate::scan::typescript::parse::{SimilarityFile, process_file_with_similarity};
 use crate::scan::{ScanConfig, collect_files};
 
 const IGNORE_DIRS: &[&str] = &[
@@ -40,7 +42,7 @@ const INCLUDE_EXTS: &[&str] = &[
 const STRIP_EXTS: &[&str] =
     &["cjs", "cts", "go", "java", "js", "jsx", "mjs", "mts", "py", "rs", "ts", "tsx"];
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
 pub fn run(
     root: &str,
     subpath: Option<&str>,
@@ -51,6 +53,14 @@ pub fn run(
     all_functions: bool,
     low_value_max_lines: u32,
     duplicate_threshold: f64,
+    function_details: bool,
+    function_min_lines: u32,
+    function_max_lines: u32,
+    health: bool,
+    only_findings: bool,
+    top: Option<usize>,
+    sort_by: Option<HealthSort>,
+    json: bool,
 ) -> Result<()> {
     let project =
         fs::canonicalize(root).context("Cannot resolve project root")?.display().to_string();
@@ -70,23 +80,52 @@ pub fn run(
     if !(0.0..=1.0).contains(&duplicate_threshold) {
         anyhow::bail!("Duplicate threshold must be between 0 and 1");
     }
+    if function_details && function_min_lines == 0 {
+        anyhow::bail!("Function minimum lines must be at least 1");
+    }
+    if function_details && function_min_lines > function_max_lines {
+        anyhow::bail!("Function minimum lines cannot exceed maximum lines");
+    }
 
-    let annotations = if functions {
+    let annotations = if functions || health {
         build_function_annotations(
             &start_path,
             &project_root,
             all_functions,
             low_value_max_lines,
             duplicate_threshold,
+            health,
+            all,
         )?
     } else {
         BTreeMap::new()
     };
     let tree = build_node(&start_path, &project_root, all, &annotations)?;
+    if health {
+        return write_health_report(
+            &tree,
+            &project,
+            only_findings,
+            top,
+            sort_by.unwrap_or(HealthSort::Severity),
+            json,
+        );
+    }
+
     let mut lines = Vec::new();
     lines.push("# Project Structure".to_string());
     lines.push(String::new());
-    render_node(&tree, &mut lines, "", true, 0, depth.max(1), inline.max(1));
+    if function_details {
+        render_detailed_tree(
+            &tree,
+            &mut lines,
+            depth.max(1),
+            function_min_lines,
+            function_max_lines,
+        );
+    } else {
+        render_node(&tree, &mut lines, "", true, 0, depth.max(1), inline.max(1));
+    }
 
     let output = lines.join("\n");
     let chars = output.len();
@@ -106,15 +145,36 @@ fn build_function_annotations(
     all_functions: bool,
     low_value_max_lines: u32,
     duplicate_threshold: f64,
+    include_health: bool,
+    include_tests: bool,
 ) -> Result<BTreeMap<String, FunctionAnnotations>> {
     let files = collect_files(scan_root, &ScanConfig::default())?;
+    let files: Vec<_> = files
+        .into_iter()
+        .filter(|path| include_tests || !is_test_path(&rel_path(project_root, path)))
+        .collect();
     let parsed: Vec<Result<_>> = files
         .par_iter()
         .map(|path| process_file_with_similarity(path, project_root, FunctionKindsFilter::All))
         .collect();
     let parsed = parsed.into_iter().collect::<Result<Vec<_>>>()?;
     let (indices, similarity_files): (Vec<_>, Vec<_>) = parsed.into_iter().unzip();
-    let duplicate_counts = function_duplicate_groups(&similarity_files, duplicate_threshold, 1)?;
+    let duplicate_groups = function_duplicate_groups(&similarity_files, duplicate_threshold, 1)?;
+    let similarity_by_path: BTreeMap<_, _> =
+        similarity_files.iter().map(|file| (file.path.as_str(), file)).collect();
+    let qualified_names: BTreeMap<_, _> = indices
+        .iter()
+        .flat_map(|index| {
+            index.functions.iter().filter_map(|function| {
+                let name = function.name.as_deref()?;
+                let qualified = function
+                    .parent
+                    .as_ref()
+                    .map_or_else(|| name.to_string(), |parent| format!("{parent}.{name}"));
+                Some(((index.path.clone(), function.line, name.to_string()), qualified))
+            })
+        })
+        .collect();
 
     let mut annotations = BTreeMap::new();
     for index in indices {
@@ -129,7 +189,7 @@ fn build_function_annotations(
                         format!("<anonymous@{}>", function.line),
                         test_file,
                         low_value_max_lines,
-                        None,
+                        Vec::new(),
                     ));
                 } else {
                     entry.anonymous_count += 1;
@@ -140,20 +200,32 @@ fn build_function_annotations(
                 .parent
                 .as_ref()
                 .map_or_else(|| name.to_string(), |parent| format!("{parent}.{name}"));
-            let duplicate_count = duplicate_counts
-                .get(&(index.path.clone(), function.line, name.to_string()))
-                .copied();
+            let key = (index.path.clone(), function.line, name.to_string());
+            let duplicate_peers = duplicate_groups
+                .get(&key)
+                .into_iter()
+                .flatten()
+                .filter(|peer| *peer != &key)
+                .map(|peer| SimilarityPeer {
+                    path: peer.0.clone(),
+                    line: peer.1,
+                    name: qualified_names.get(peer).cloned().unwrap_or_else(|| peer.2.clone()),
+                })
+                .collect();
             entry.labels.push(function_label(
                 function,
                 qualified,
                 test_file,
                 low_value_max_lines,
-                duplicate_count,
+                duplicate_peers,
             ));
         }
         entry.labels.sort_by(|left, right| {
             left.line.cmp(&right.line).then_with(|| left.name.cmp(&right.name))
         });
+        if include_health && let Some(similarity) = similarity_by_path.get(index.path.as_str()) {
+            entry.health = Some(build_file_health(&index, similarity, &duplicate_groups));
+        }
     }
     Ok(annotations)
 }
@@ -163,7 +235,7 @@ fn function_label(
     name: String,
     test_file: bool,
     low_value_max_lines: u32,
-    duplicate_count: Option<usize>,
+    duplicate_peers: Vec<SimilarityPeer>,
 ) -> FunctionLabel {
     let mut markers = Vec::new();
     if !test_file && hoistable_function(function) {
@@ -175,16 +247,39 @@ fn function_label(
     if !test_file && low_value_function(function, low_value_max_lines) {
         markers.push("[L]".to_string());
     }
-    if let Some(count) = duplicate_count {
-        markers.push(format!("[D:{count}]"));
+    if !duplicate_peers.is_empty() {
+        markers.push(format!("[D:{}]", duplicate_peers.len() + 1));
     }
-    FunctionLabel { line: function.line, name, markers }
+    FunctionLabel {
+        line: function.line,
+        lines: function.line_end.saturating_sub(function.line) + 1,
+        name,
+        parent: function.parent.clone(),
+        capture_count: function.captures.len(),
+        hoistable: !test_file && hoistable_function(function),
+        low_value_reason: function.low_value_reason.clone(),
+        duplicate_peers,
+        markers,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SimilarityPeer {
+    path: String,
+    line: u32,
+    name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct FunctionLabel {
     line: u32,
+    lines: u32,
     name: String,
+    parent: Option<String>,
+    capture_count: usize,
+    hoistable: bool,
+    low_value_reason: Option<String>,
+    duplicate_peers: Vec<SimilarityPeer>,
     markers: Vec<String>,
 }
 
@@ -192,6 +287,316 @@ struct FunctionLabel {
 struct FunctionAnnotations {
     labels: Vec<FunctionLabel>,
     anonymous_count: usize,
+    health: Option<FileHealth>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum HealthSeverity {
+    None,
+    Medium,
+    High,
+}
+
+impl HealthSeverity {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::None => "OK",
+            Self::Medium => "MEDIUM",
+            Self::High => "HIGH",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthFinding {
+    kind: String,
+    severity: HealthSeverity,
+    message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FileHealth {
+    path: String,
+    severity: HealthSeverity,
+    lines: usize,
+    largest_function: Option<String>,
+    largest_function_lines: u32,
+    named_functions: usize,
+    anonymous_callbacks: usize,
+    nested_functions: usize,
+    max_function_nesting: usize,
+    capture_total: usize,
+    capture_max: usize,
+    trivial_wrappers: usize,
+    wrapper_density_percent: usize,
+    duplicate_groups: usize,
+    duplicate_functions: usize,
+    estimated_removable_lines: usize,
+    max_branch_complexity: usize,
+    max_control_nesting: usize,
+    hook_calls: usize,
+    state_calls: usize,
+    effect_calls: usize,
+    exports: usize,
+    dependencies: usize,
+    findings: Vec<HealthFinding>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HealthReport {
+    version: u8,
+    root: String,
+    files: Vec<FileHealth>,
+}
+
+fn build_file_health(
+    index: &FileIndex,
+    similarity: &SimilarityFile,
+    duplicate_groups: &BTreeMap<FunctionDuplicateKey, Vec<FunctionDuplicateKey>>,
+) -> FileHealth {
+    let named_functions = index.functions.iter().filter(|function| function.name.is_some()).count();
+    let anonymous_callbacks = index.functions.len().saturating_sub(named_functions);
+    let nested_functions =
+        index.functions.iter().filter(|function| function.parent.is_some()).count();
+    let max_function_nesting = index
+        .functions
+        .iter()
+        .filter_map(|function| function.parent.as_ref())
+        .map(|parent| parent.matches('.').count() + 1)
+        .max()
+        .unwrap_or(0);
+    let capture_total = index.functions.iter().map(|function| function.captures.len()).sum();
+    let capture_max =
+        index.functions.iter().map(|function| function.captures.len()).max().unwrap_or(0);
+    let trivial_wrappers = index
+        .functions
+        .iter()
+        .filter(|function| function.name.is_some() && function.low_value_reason.is_some())
+        .count();
+    let wrapper_density_percent =
+        trivial_wrappers.saturating_mul(100).checked_div(named_functions).unwrap_or(0);
+    let largest = index
+        .functions
+        .iter()
+        .filter_map(|function| {
+            let name = function.name.as_ref()?;
+            Some((function.line_end.saturating_sub(function.line) + 1, name.clone()))
+        })
+        .max_by(|left, right| left.0.cmp(&right.0).then_with(|| right.1.cmp(&left.1)));
+    let (largest_function_lines, largest_function) =
+        largest.map_or((0, None), |(lines, name)| (lines, Some(name)));
+
+    let mut group_ids = BTreeSet::new();
+    let mut duplicate_functions = 0;
+    let mut estimated_removable_lines = 0;
+    for function in &index.functions {
+        let Some(name) = function.name.as_ref() else {
+            continue;
+        };
+        let key = (index.path.clone(), function.line, name.clone());
+        let Some(group) = duplicate_groups.get(&key) else {
+            continue;
+        };
+        let Some(canonical) = group.first() else {
+            continue;
+        };
+        group_ids.insert(canonical.clone());
+        duplicate_functions += 1;
+        if &key != canonical {
+            estimated_removable_lines +=
+                function.line_end.saturating_sub(function.line) as usize + 1;
+        }
+    }
+
+    let mut health = FileHealth {
+        path: index.path.clone(),
+        severity: HealthSeverity::None,
+        lines: similarity.source.lines().count(),
+        largest_function,
+        largest_function_lines,
+        named_functions,
+        anonymous_callbacks,
+        nested_functions,
+        max_function_nesting,
+        capture_total,
+        capture_max,
+        trivial_wrappers,
+        wrapper_density_percent,
+        duplicate_groups: group_ids.len(),
+        duplicate_functions,
+        estimated_removable_lines,
+        max_branch_complexity: similarity.health.max_branch_complexity,
+        max_control_nesting: similarity.health.max_control_nesting,
+        hook_calls: similarity.health.hook_calls,
+        state_calls: similarity.health.state_calls,
+        effect_calls: similarity.health.effect_calls,
+        exports: index.exports.len(),
+        dependencies: similarity.health.dependencies.len(),
+        findings: Vec::new(),
+    };
+    health.findings = health_findings(&health);
+    health.severity = health
+        .findings
+        .iter()
+        .map(|finding| finding.severity)
+        .max()
+        .unwrap_or(HealthSeverity::None);
+    health
+}
+
+#[allow(clippy::too_many_lines)]
+fn health_findings(health: &FileHealth) -> Vec<HealthFinding> {
+    let mut findings = Vec::new();
+    push_threshold_finding(
+        &mut findings,
+        "oversized_file",
+        health.lines,
+        300,
+        500,
+        format!("{} lines", health.lines),
+    );
+    push_threshold_finding(
+        &mut findings,
+        "function_sprawl",
+        health.named_functions + health.anonymous_callbacks,
+        15,
+        30,
+        format!(
+            "{} named functions and {} anonymous callbacks",
+            health.named_functions, health.anonymous_callbacks
+        ),
+    );
+    push_threshold_finding(
+        &mut findings,
+        "callback_sprawl",
+        health.anonymous_callbacks,
+        10,
+        20,
+        format!("{} anonymous callbacks", health.anonymous_callbacks),
+    );
+    push_threshold_finding(
+        &mut findings,
+        "capture_coupling",
+        health.capture_total,
+        15,
+        30,
+        format!(
+            "{} total parent-variable uses; maximum {} in one function",
+            health.capture_total, health.capture_max
+        ),
+    );
+    if health.trivial_wrappers >= 3 && health.wrapper_density_percent >= 30 {
+        findings.push(HealthFinding {
+            kind: "wrapper_density".to_string(),
+            severity: if health.wrapper_density_percent >= 50 {
+                HealthSeverity::High
+            } else {
+                HealthSeverity::Medium
+            },
+            message: format!(
+                "{} trivial wrappers ({}% of named functions)",
+                health.trivial_wrappers, health.wrapper_density_percent
+            ),
+        });
+    }
+    push_threshold_finding(
+        &mut findings,
+        "duplicate_code",
+        health.estimated_removable_lines,
+        10,
+        30,
+        format!(
+            "{} similarity group{}; about {} removable lines",
+            health.duplicate_groups,
+            if health.duplicate_groups == 1 { "" } else { "s" },
+            health.estimated_removable_lines
+        ),
+    );
+    push_threshold_finding(
+        &mut findings,
+        "branch_complexity",
+        health.max_branch_complexity,
+        8,
+        15,
+        format!("maximum branch complexity {}", health.max_branch_complexity),
+    );
+    push_threshold_finding(
+        &mut findings,
+        "control_nesting",
+        health.max_control_nesting,
+        3,
+        5,
+        format!("maximum control-flow nesting {}", health.max_control_nesting),
+    );
+    push_threshold_finding(
+        &mut findings,
+        "hook_sprawl",
+        health.hook_calls,
+        8,
+        15,
+        format!(
+            "{} hook calls, including {} state and {} effect calls",
+            health.hook_calls, health.state_calls, health.effect_calls
+        ),
+    );
+    push_threshold_finding(
+        &mut findings,
+        "state_sprawl",
+        health.state_calls,
+        4,
+        8,
+        format!("{} state hook calls", health.state_calls),
+    );
+    push_threshold_finding(
+        &mut findings,
+        "effect_sprawl",
+        health.effect_calls,
+        3,
+        5,
+        format!("{} effect hook calls", health.effect_calls),
+    );
+    push_threshold_finding(
+        &mut findings,
+        "dependency_fan_out",
+        health.dependencies,
+        15,
+        25,
+        format!("{} imported dependencies", health.dependencies),
+    );
+    push_threshold_finding(
+        &mut findings,
+        "export_sprawl",
+        health.exports,
+        8,
+        15,
+        format!("{} exports", health.exports),
+    );
+    findings.sort_by(|left, right| {
+        right.severity.cmp(&left.severity).then_with(|| left.kind.cmp(&right.kind))
+    });
+    findings
+}
+
+fn push_threshold_finding(
+    findings: &mut Vec<HealthFinding>,
+    kind: &str,
+    value: usize,
+    medium: usize,
+    high: usize,
+    message: String,
+) {
+    let severity = if value >= high {
+        HealthSeverity::High
+    } else if value >= medium {
+        HealthSeverity::Medium
+    } else {
+        return;
+    };
+    findings.push(HealthFinding { kind: kind.to_string(), severity, message });
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -357,6 +762,320 @@ fn render_file_list(files: &[FileEntry], lines: &mut Vec<String>, indent: &str, 
     }
 }
 
+#[allow(clippy::too_many_lines)]
+fn write_health_report(
+    tree: &TreeNode,
+    root: &str,
+    only_findings: bool,
+    top: Option<usize>,
+    sort_by: HealthSort,
+    json: bool,
+) -> Result<()> {
+    let mut files = Vec::new();
+    collect_file_health(tree, &mut files);
+    if only_findings {
+        files.retain(|file| !file.findings.is_empty());
+    }
+    files.sort_by(|left, right| {
+        let order = match sort_by {
+            HealthSort::Severity => right
+                .severity
+                .cmp(&left.severity)
+                .then_with(|| right.findings.len().cmp(&left.findings.len())),
+            HealthSort::Coupling => right
+                .capture_total
+                .cmp(&left.capture_total)
+                .then_with(|| right.capture_max.cmp(&left.capture_max)),
+            HealthSort::Duplicates => right
+                .estimated_removable_lines
+                .cmp(&left.estimated_removable_lines)
+                .then_with(|| right.duplicate_groups.cmp(&left.duplicate_groups)),
+            HealthSort::Size => right.lines.cmp(&left.lines),
+        };
+        order.then_with(|| left.path.cmp(&right.path))
+    });
+    if let Some(limit) = top {
+        files.truncate(limit);
+    }
+
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    if json {
+        serde_json::to_writer(
+            &mut out,
+            &HealthReport { version: 1, root: root.to_string(), files },
+        )?;
+        writeln!(out)?;
+        return Ok(());
+    }
+
+    let high = files.iter().filter(|file| file.severity == HealthSeverity::High).count();
+    let medium = files.iter().filter(|file| file.severity == HealthSeverity::Medium).count();
+    writeln!(out, "# Project Health")?;
+    writeln!(out)?;
+    writeln!(out, "{} files shown; {high} high concern; {medium} medium concern", files.len())?;
+    for file in files {
+        writeln!(out)?;
+        writeln!(out, "{} — {}", file.path, file.severity.label())?;
+        writeln!(
+            out,
+            "├── size: {} lines; largest function: {} ({} lines)",
+            file.lines,
+            file.largest_function.as_deref().unwrap_or("none"),
+            file.largest_function_lines
+        )?;
+        writeln!(
+            out,
+            "├── functions: {} named; {} anonymous callbacks; {} nested total; nesting maximum {}",
+            file.named_functions,
+            file.anonymous_callbacks,
+            file.nested_functions,
+            file.max_function_nesting
+        )?;
+        writeln!(
+            out,
+            "├── coupling: {} total parent-variable uses; maximum {}",
+            file.capture_total, file.capture_max
+        )?;
+        writeln!(
+            out,
+            "├── wrappers: {} trivial ({}% of named functions)",
+            file.trivial_wrappers, file.wrapper_density_percent
+        )?;
+        writeln!(
+            out,
+            "├── duplicates: {} group{}; {} function{}; about {} removable lines",
+            file.duplicate_groups,
+            if file.duplicate_groups == 1 { "" } else { "s" },
+            file.duplicate_functions,
+            if file.duplicate_functions == 1 { "" } else { "s" },
+            file.estimated_removable_lines
+        )?;
+        writeln!(
+            out,
+            "├── complexity: branch maximum {}; control nesting maximum {}",
+            file.max_branch_complexity, file.max_control_nesting
+        )?;
+        writeln!(
+            out,
+            "├── React: {} hooks; {} state calls; {} effect calls",
+            file.hook_calls, file.state_calls, file.effect_calls
+        )?;
+        writeln!(
+            out,
+            "├── module: {} exports; {} imported dependencies",
+            file.exports, file.dependencies
+        )?;
+        if file.findings.is_empty() {
+            writeln!(out, "└── findings: none")?;
+        } else {
+            writeln!(out, "└── findings:")?;
+            let finding_count = file.findings.len();
+            for (index, finding) in file.findings.into_iter().enumerate() {
+                let connector = if index + 1 == finding_count { "└──" } else { "├──" };
+                writeln!(out, "    {connector} {}: {}", finding.severity.label(), finding.message)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn collect_file_health(node: &TreeNode, output: &mut Vec<FileHealth>) {
+    for file in &node.files {
+        if let Some(health) = &file.functions.health {
+            output.push(health.clone());
+        }
+    }
+    for dir in &node.dirs {
+        collect_file_health(dir, output);
+    }
+}
+
+fn render_detailed_tree(
+    node: &TreeNode,
+    lines: &mut Vec<String>,
+    max_depth: usize,
+    min_lines: u32,
+    max_lines: u32,
+) {
+    if !node.rel_path.is_empty() {
+        lines.push(format!("{}/", node.rel_path));
+    }
+    render_detailed_node(node, lines, "", 0, max_depth, min_lines, max_lines);
+    if !node_has_detailed_matches(node, min_lines, max_lines) {
+        lines.push(format!("(no named functions between {min_lines} and {max_lines} lines)"));
+    }
+}
+
+fn render_detailed_node(
+    node: &TreeNode,
+    lines: &mut Vec<String>,
+    indent: &str,
+    depth: usize,
+    max_depth: usize,
+    min_lines: u32,
+    max_lines: u32,
+) {
+    let dirs: Vec<_> = node
+        .dirs
+        .iter()
+        .filter(|dir| node_has_detailed_matches(dir, min_lines, max_lines))
+        .collect();
+    let files: Vec<_> = node
+        .files
+        .iter()
+        .filter(|file| !detailed_labels(file, min_lines, max_lines).is_empty())
+        .collect();
+    let child_count = dirs.len() + files.len();
+
+    for (index, dir) in dirs.iter().enumerate() {
+        let is_last = index + 1 == child_count;
+        let connector = if is_last { "└──" } else { "├──" };
+        if depth + 1 >= max_depth {
+            lines.push(format!(
+                "{indent}{connector} {}/ ({} matching files)",
+                dir.name,
+                detailed_file_count(dir, min_lines, max_lines)
+            ));
+            continue;
+        }
+        lines.push(format!("{indent}{connector} {}/", dir.name));
+        let child_indent = format!("{indent}{}   ", if is_last { " " } else { "│" });
+        render_detailed_node(dir, lines, &child_indent, depth + 1, max_depth, min_lines, max_lines);
+    }
+
+    for (file_index, file) in files.iter().enumerate() {
+        let index = dirs.len() + file_index;
+        let is_last = index + 1 == child_count;
+        let connector = if is_last { "└──" } else { "├──" };
+        lines.push(format!("{indent}{connector} {}", file.name));
+        let child_indent = format!("{indent}{}   ", if is_last { " " } else { "│" });
+        let labels = detailed_labels(file, min_lines, max_lines);
+        render_detailed_functions(&labels, lines, &child_indent);
+    }
+}
+
+fn node_has_detailed_matches(node: &TreeNode, min_lines: u32, max_lines: u32) -> bool {
+    node.files.iter().any(|file| !detailed_labels(file, min_lines, max_lines).is_empty())
+        || node.dirs.iter().any(|dir| node_has_detailed_matches(dir, min_lines, max_lines))
+}
+
+fn detailed_file_count(node: &TreeNode, min_lines: u32, max_lines: u32) -> usize {
+    node.files.iter().filter(|file| !detailed_labels(file, min_lines, max_lines).is_empty()).count()
+        + node.dirs.iter().map(|dir| detailed_file_count(dir, min_lines, max_lines)).sum::<usize>()
+}
+
+fn detailed_labels(file: &FileEntry, min_lines: u32, max_lines: u32) -> Vec<&FunctionLabel> {
+    let by_name: BTreeMap<_, _> =
+        file.functions.labels.iter().map(|label| (label.name.as_str(), label)).collect();
+    let mut visible = BTreeSet::new();
+    for label in &file.functions.labels {
+        if !(min_lines..=max_lines).contains(&label.lines) {
+            continue;
+        }
+        visible.insert(label.name.clone());
+        let mut parent = label.parent.as_deref();
+        while let Some(name) = parent {
+            if !visible.insert(name.to_string()) {
+                break;
+            }
+            parent = by_name.get(name).and_then(|label| label.parent.as_deref());
+        }
+    }
+    let mut labels: Vec<_> =
+        file.functions.labels.iter().filter(|label| visible.contains(&label.name)).collect();
+    labels
+        .sort_by(|left, right| left.line.cmp(&right.line).then_with(|| left.name.cmp(&right.name)));
+    labels
+}
+
+fn render_detailed_functions(labels: &[&FunctionLabel], lines: &mut Vec<String>, indent: &str) {
+    let visible: BTreeSet<_> = labels.iter().map(|label| label.name.as_str()).collect();
+    let mut children: BTreeMap<Option<&str>, Vec<&FunctionLabel>> = BTreeMap::new();
+    for label in labels {
+        let parent = label.parent.as_deref().filter(|parent| visible.contains(parent));
+        children.entry(parent).or_default().push(label);
+    }
+    for siblings in children.values_mut() {
+        siblings.sort_by_key(|label| (label.line, label.name.as_str()));
+    }
+    if let Some(roots) = children.get(&None) {
+        for (index, root) in roots.iter().enumerate() {
+            render_detailed_function(root, &children, lines, indent, index + 1 == roots.len());
+        }
+    }
+}
+
+fn render_detailed_function(
+    label: &FunctionLabel,
+    children: &BTreeMap<Option<&str>, Vec<&FunctionLabel>>,
+    lines: &mut Vec<String>,
+    indent: &str,
+    is_last: bool,
+) {
+    let connector = if is_last { "└──" } else { "├──" };
+    lines.push(format!("{indent}{connector} {}", detailed_function_description(label)));
+    let child_indent = format!("{indent}{}   ", if is_last { " " } else { "│" });
+    if let Some(nested) = children.get(&Some(label.name.as_str())) {
+        for (index, child) in nested.iter().enumerate() {
+            render_detailed_function(
+                child,
+                children,
+                lines,
+                &child_indent,
+                index + 1 == nested.len(),
+            );
+        }
+    }
+}
+
+fn detailed_function_description(label: &FunctionLabel) -> String {
+    let short_name = label.name.rsplit('.').next().unwrap_or(&label.name);
+    let mut details = vec![format!("{} lines", label.lines)];
+    if label.parent.is_some() {
+        if label.capture_count == 0 {
+            details.push("uses no parent variables".to_string());
+        } else {
+            details.push(format!(
+                "uses {} parent variable{}",
+                label.capture_count,
+                if label.capture_count == 1 { "" } else { "s" }
+            ));
+        }
+    }
+    if let Some(reason) = label.low_value_reason.as_deref() {
+        details.push(low_value_explanation(reason).to_string());
+    }
+    if label.hoistable {
+        details.push("can move outside its parent".to_string());
+    }
+    if !label.duplicate_peers.is_empty() {
+        let mut peers: Vec<_> = label
+            .duplicate_peers
+            .iter()
+            .take(2)
+            .map(|peer| format!("{} in {}:{}", peer.name, peer.path, peer.line))
+            .collect();
+        if label.duplicate_peers.len() > 2 {
+            peers.push(format!("{} more", label.duplicate_peers.len() - 2));
+        }
+        details.push(format!("similar to {}", peers.join(", ")));
+    }
+    format!("{short_name} — {}", details.join("; "))
+}
+
+fn low_value_explanation(reason: &str) -> &str {
+    match reason {
+        "empty" | "empty_return" => "empty function; review whether it is needed",
+        "constant_return" => "only returns a constant; review for inlining",
+        "identity_return" => "only returns its input; review whether it adds value",
+        "property_return" => "only returns one property; review for inlining",
+        "thin_wrapper" => "only returns another call; review for inlining",
+        "side_effect_wrapper" => "only forwards a call; review for inlining",
+        _ => "small trivial wrapper; review whether it adds value",
+    }
+}
+
 fn fmt_file(file: &FileEntry) -> String {
     strip_known_ext(&file.name)
 }
@@ -517,8 +1236,8 @@ function duplicateOne(values: number[]) {
         )
         .expect("write b");
         let root = tmp.path().canonicalize().expect("canonical root");
-        let annotations =
-            build_function_annotations(&root, &root, false, 3, 0.0).expect("annotations");
+        let annotations = build_function_annotations(&root, &root, false, 3, 0.0, false, false)
+            .expect("annotations");
         let a = annotations.get("a.ts").expect("a annotations");
         let marker_map: BTreeMap<_, _> =
             a.labels.iter().map(|label| (label.name.as_str(), label.markers.as_slice())).collect();
@@ -530,6 +1249,57 @@ function duplicateOne(values: number[]) {
             marker_map["duplicateOne"].contains(&"[D:2]".to_string()),
             "annotations: {annotations:?}"
         );
+    }
+
+    #[test]
+    fn detailed_tree_renders_hierarchy_lines_and_similarity_in_plain_language() {
+        let tmp = tempdir().expect("tempdir");
+        for (file, component) in [("a.tsx", "Card"), ("b.tsx", "OtherCard")] {
+            fs::write(
+                tmp.path().join(file),
+                format!(
+                    "function {component}() {{\n  const setRejected = (value: boolean) => value;\n  function flash() {{\n    setRejected(true);\n  }}\n  return null;\n}}\n"
+                ),
+            )
+            .expect("write component");
+        }
+        let root = tmp.path().canonicalize().expect("canonical root");
+        let annotations = build_function_annotations(&root, &root, false, 3, 0.87, false, false)
+            .expect("annotations");
+        let tree = build_node(&root, &root, false, &annotations).expect("tree");
+        let mut lines = Vec::new();
+        render_detailed_tree(&tree, &mut lines, 6, 3, 3);
+        let output = lines.join("\n");
+
+        assert!(output.contains("a.tsx"), "output: {output}");
+        assert!(output.contains("Card — 7 lines"), "output: {output}");
+        assert!(output.contains("flash — 3 lines; uses 1 parent variable"), "output: {output}");
+        assert!(output.contains("similar to OtherCard.flash in b.tsx:3"), "output: {output}");
+        assert!(!output.contains("[C:"), "output: {output}");
+        assert!(!output.contains("[D:"), "output: {output}");
+    }
+
+    #[test]
+    fn health_metrics_include_size_react_module_and_findings() {
+        let tmp = tempdir().expect("tempdir");
+        let mut source = "import { useState } from 'react';\nexport function LargeComponent() {\n  const [value] = useState(0);\n".to_string();
+        for _ in 0..300 {
+            source.push_str("  // padding\n");
+        }
+        source.push_str("  return value;\n}\n");
+        fs::write(tmp.path().join("large.tsx"), source).expect("write source");
+        let root = tmp.path().canonicalize().expect("canonical root");
+        let annotations = build_function_annotations(&root, &root, false, 3, 0.87, true, false)
+            .expect("annotations");
+        let health = annotations["large.tsx"].health.as_ref().expect("health");
+
+        assert!(health.lines >= 305);
+        assert_eq!(health.hook_calls, 1);
+        assert_eq!(health.state_calls, 1);
+        assert_eq!(health.dependencies, 1);
+        assert!(health.findings.iter().any(|finding| finding.kind == "oversized_file"));
+        let json = serde_json::to_value(health).expect("health json");
+        assert_eq!(json["stateCalls"], 1);
     }
 
     #[test]

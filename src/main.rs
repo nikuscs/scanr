@@ -5,6 +5,7 @@ mod cli;
 mod commands;
 mod scan;
 mod similarity;
+mod slop;
 
 use cli::{Cli, Commands};
 
@@ -13,6 +14,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Dupes(args) => commands::dupes::run(&args),
+        Commands::Slop(args) => commands::slop::run(&args),
         Commands::Search(args) => commands::search::run(&args),
         Commands::Tree {
             root,
@@ -24,6 +26,14 @@ fn main() -> Result<()> {
             all_functions,
             low_value_max_lines,
             duplicate_threshold,
+            function_details,
+            function_min_lines,
+            function_max_lines,
+            health,
+            only_findings,
+            top,
+            sort_by,
+            json,
         } => commands::tree::run(
             &root,
             path.as_deref(),
@@ -34,6 +44,14 @@ fn main() -> Result<()> {
             all_functions,
             low_value_max_lines,
             duplicate_threshold,
+            function_details,
+            function_min_lines,
+            function_max_lines,
+            health,
+            only_findings,
+            top,
+            sort_by,
+            json,
         ),
         Commands::Scan(args) => commands::scan::run(&args),
     }

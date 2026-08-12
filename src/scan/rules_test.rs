@@ -1,5 +1,8 @@
 use super::*;
-use crate::scan::types::{BindingInfo, FileIndex, FunctionInfo, FunctionKind};
+use crate::scan::types::{
+    BindingInfo, ClassInfo, FileIndex, FunctionContent, FunctionInfo, FunctionKind,
+};
+use crate::slop::types::FileFacts;
 
 fn mk_fi(path: &str, fn_names: &[&str], binding_unused: bool) -> FileIndex {
     let functions = fn_names
@@ -13,6 +16,7 @@ fn mk_fi(path: &str, fn_names: &[&str], binding_unused: bool) -> FileIndex {
             exported: true,
             is_async: false,
             is_generator: false,
+            content: FunctionContent::Plain,
             line: 1,
             col: 1,
             line_end: 1,
@@ -33,10 +37,12 @@ fn mk_fi(path: &str, fn_names: &[&str], binding_unused: bool) -> FileIndex {
     FileIndex {
         path: path.into(),
         functions,
+        classes: vec![],
         bindings,
         exports: vec![],
         violations: vec![],
         parse_errors: 0,
+        slop: FileFacts::default(),
     }
 }
 
@@ -135,6 +141,271 @@ fn low_value_function_requires_trivial_shape_and_line_limit() {
     let violation = fi.violations.first().unwrap();
     assert_eq!(violation.count, 1);
     assert_eq!(violation.details, vec!["tiny:thin_wrapper"]);
+}
+
+#[test]
+fn low_value_local_helper_requires_trivial_top_level_one_or_two_use_function() {
+    let mut fi = mk_fi(
+        "src/helpers.ts",
+        &["oneUse", "twoUse", "exported", "nested", "dead", "popular", "complex", "long"],
+        false,
+    );
+    for function in &mut fi.functions {
+        function.exported = false;
+        function.low_value_reason = Some("thin_wrapper".into());
+    }
+    fi.functions[2].exported = true;
+    fi.functions[3].parent = Some("Component".into());
+    fi.functions[6].low_value_reason = None;
+    fi.functions[7].line_end = 4;
+    fi.bindings = vec![
+        ("oneUse", 1),
+        ("twoUse", 2),
+        ("exported", 1),
+        ("nested", 1),
+        ("dead", 0),
+        ("popular", 3),
+        ("complex", 1),
+        ("long", 1),
+    ]
+    .into_iter()
+    .map(|(name, refs)| BindingInfo {
+        name: name.into(),
+        kind: BindingKind::Function,
+        exported: false,
+        refs,
+        line: 1,
+        col: 1,
+    })
+    .collect();
+
+    run_rules_with_options(
+        &["low_value_local_helper".into()],
+        &mut fi,
+        RuleOptions { low_value_max_lines: 3, ..RuleOptions::default() },
+    );
+    let violation = fi.violations.first().unwrap();
+    assert_eq!(violation.count, 2);
+    assert_eq!(
+        violation.details,
+        vec!["oneUse:helper:thin_wrapper:1", "twoUse:helper:thin_wrapper:2"]
+    );
+}
+
+#[test]
+fn low_value_local_helper_matches_binding_by_declaration_line() {
+    let mut fi = mk_fi("src/helpers.ts", &["helper"], false);
+    fi.functions[0].exported = false;
+    fi.functions[0].low_value_reason = Some("property_return".into());
+    fi.functions[0].line = 10;
+    fi.functions[0].line_end = 12;
+    fi.bindings = vec![
+        BindingInfo {
+            name: "helper".into(),
+            kind: BindingKind::Function,
+            exported: false,
+            refs: 8,
+            line: 2,
+            col: 1,
+        },
+        BindingInfo {
+            name: "helper".into(),
+            kind: BindingKind::Function,
+            exported: false,
+            refs: 2,
+            line: 10,
+            col: 1,
+        },
+    ];
+
+    run_rules(&["low_value_local_helper".into()], &mut fi);
+    assert_eq!(fi.violations[0].details, vec!["helper:helper:property_return:2"]);
+}
+
+#[test]
+fn dominant_function_with_two_tiny_helpers_is_grouped() {
+    let mut fi = mk_fi("src/feature.ts", &["large", "first", "second"], false);
+    for function in &mut fi.functions {
+        function.exported = false;
+    }
+    fi.functions[0].line_end = 300;
+    fi.functions[1].low_value_reason = Some("thin_wrapper".into());
+    fi.functions[2].low_value_reason = None;
+    fi.bindings = vec![
+        BindingInfo {
+            name: "first".into(),
+            kind: BindingKind::Function,
+            exported: false,
+            refs: 1,
+            line: 1,
+            col: 1,
+        },
+        BindingInfo {
+            name: "second".into(),
+            kind: BindingKind::Function,
+            exported: false,
+            refs: 2,
+            line: 1,
+            col: 1,
+        },
+    ];
+
+    run_rules(&["dominant_container_tiny_helpers".into()], &mut fi);
+    let violation = fi.violations.first().unwrap();
+    assert_eq!(violation.count, 2);
+    assert_eq!(violation.details[0], "container:function:large:300");
+    assert_eq!(violation.details[1], "helper:first:thin_wrapper:1:1");
+    assert_eq!(violation.details[2], "helper:second:small_local:2:1");
+}
+
+#[test]
+fn dominant_class_requires_configured_tiny_helper_count() {
+    let mut fi = mk_fi("src/feature.ts", &["onlyHelper"], false);
+    fi.functions[0].exported = false;
+    fi.functions[0].low_value_reason = Some("thin_wrapper".into());
+    fi.classes =
+        vec![ClassInfo { name: "LargeService".into(), exported: true, line: 1, line_end: 350 }];
+    fi.bindings = vec![BindingInfo {
+        name: "onlyHelper".into(),
+        kind: BindingKind::Function,
+        exported: false,
+        refs: 1,
+        line: 1,
+        col: 1,
+    }];
+
+    run_rules(&["dominant_container_tiny_helpers".into()], &mut fi);
+    assert!(fi.violations.is_empty());
+
+    fi.functions.push(FunctionInfo {
+        name: Some("secondHelper".into()),
+        parent: None,
+        captures: vec![],
+        low_value_reason: Some("constant_return".into()),
+        kind: FunctionKind::Declaration,
+        exported: false,
+        is_async: false,
+        is_generator: false,
+        content: FunctionContent::Plain,
+        line: 10,
+        col: 1,
+        line_end: 12,
+    });
+    fi.bindings.push(BindingInfo {
+        name: "secondHelper".into(),
+        kind: BindingKind::Function,
+        exported: false,
+        refs: 2,
+        line: 10,
+        col: 1,
+    });
+    run_rules(&["dominant_container_tiny_helpers".into()], &mut fi);
+    assert_eq!(fi.violations[0].details[0], "container:class:LargeService:350");
+}
+
+#[test]
+fn low_value_local_helper_excludes_tsx_components_and_hooks() {
+    let mut fi = mk_fi("src/view.tsx", &["Card", "useThing", "formatValue"], false);
+    for function in &mut fi.functions {
+        function.exported = false;
+        function.low_value_reason = Some("thin_wrapper".into());
+        function.content = if function.name.as_deref() == Some("Card") {
+            FunctionContent::Jsx
+        } else {
+            FunctionContent::Plain
+        };
+    }
+    fi.bindings = ["Card", "useThing", "formatValue"]
+        .into_iter()
+        .map(|name| BindingInfo {
+            name: name.into(),
+            kind: BindingKind::Function,
+            exported: false,
+            refs: 1,
+            line: 1,
+            col: 1,
+        })
+        .collect();
+
+    run_rules(&["low_value_local_helper".into()], &mut fi);
+    assert_eq!(fi.violations[0].details, vec!["formatValue:helper:thin_wrapper:1"]);
+}
+
+#[test]
+fn loose_low_value_includes_small_ordinary_and_component_local_bodies() {
+    let mut fi = mk_fi(
+        "src/view.tsx",
+        &["formatValue", "handleClick", "Card", "useThing", "manyUses"],
+        false,
+    );
+    for function in &mut fi.functions {
+        function.exported = false;
+        function.low_value_reason = None;
+        function.line_end = 3;
+    }
+    fi.functions[1].parent = Some("Card".into());
+    fi.functions[2].content = FunctionContent::Jsx;
+    fi.bindings = ["formatValue", "handleClick", "Card", "useThing", "manyUses"]
+        .into_iter()
+        .map(|name| BindingInfo {
+            name: name.into(),
+            kind: BindingKind::Function,
+            exported: false,
+            refs: if name == "manyUses" { 3 } else { 1 },
+            line: 1,
+            col: 1,
+        })
+        .collect();
+
+    run_rules_with_options(&["low_value_local_helper".into()], &mut fi, RuleOptions::default());
+    assert!(fi.violations.is_empty());
+
+    run_rules_with_options(
+        &["low_value_local_helper".into()],
+        &mut fi,
+        RuleOptions { loose_low_value: true, ..RuleOptions::default() },
+    );
+    assert_eq!(
+        fi.violations[0].details,
+        vec!["formatValue:helper:small_local:1", "handleClick:componentLocal:small_local:1"]
+    );
+}
+
+#[test]
+fn loose_dominant_rule_includes_component_local_satellites() {
+    let mut fi = mk_fi("src/view.tsx", &["BigView", "first", "second"], false);
+    for function in &mut fi.functions {
+        function.exported = false;
+    }
+    fi.functions[0].line_end = 300;
+    fi.functions[0].content = FunctionContent::Jsx;
+    fi.functions[1].parent = Some("BigView".into());
+    fi.functions[2].parent = Some("BigView".into());
+    fi.bindings = ["first", "second"]
+        .into_iter()
+        .map(|name| BindingInfo {
+            name: name.into(),
+            kind: BindingKind::Function,
+            exported: false,
+            refs: 1,
+            line: 1,
+            col: 1,
+        })
+        .collect();
+
+    run_rules_with_options(
+        &["dominant_container_tiny_helpers".into()],
+        &mut fi,
+        RuleOptions::default(),
+    );
+    assert!(fi.violations.is_empty());
+
+    run_rules_with_options(
+        &["dominant_container_tiny_helpers".into()],
+        &mut fi,
+        RuleOptions { loose_low_value: true, ..RuleOptions::default() },
+    );
+    assert_eq!(fi.violations[0].count, 2);
 }
 
 #[test]

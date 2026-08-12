@@ -1,3 +1,4 @@
+pub mod health;
 pub mod output;
 pub mod rules;
 pub mod types;

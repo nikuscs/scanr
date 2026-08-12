@@ -41,6 +41,9 @@ pub fn run(args: &ScanArgs) -> Result<()> {
     let rule_options = crate::scan::rules::RuleOptions {
         include_test_files: args.include_test_files,
         low_value_max_lines: args.low_value_max_lines,
+        loose_low_value: args.loose_low_value,
+        dominant_container_min_lines: args.dominant_container_min_lines,
+        dominant_helper_min_count: args.dominant_helper_min_count,
     };
     for index in &mut result.file_indices {
         crate::scan::rules::run_rules_with_options(&args.rules, index, rule_options);

@@ -16,6 +16,9 @@ pub enum Commands {
     /// Find duplicate and similar functions and types
     Dupes(DupesArgs),
 
+    /// Report deterministic, evidence-backed code-slop review signals
+    Slop(SlopArgs),
+
     /// Search file contents or paths
     Search(SearchArgs),
 
@@ -56,10 +59,50 @@ pub enum Commands {
         /// Similarity threshold for duplicate-group markers (0-1)
         #[arg(long, default_value_t = 0.87, requires = "functions")]
         duplicate_threshold: f64,
+
+        /// Render nested functions with plain-English analysis details
+        #[arg(long, requires = "functions")]
+        function_details: bool,
+
+        /// Minimum function length shown by --function-details
+        #[arg(long, default_value_t = 3, requires = "function_details")]
+        function_min_lines: u32,
+
+        /// Maximum function length shown by --function-details
+        #[arg(long, default_value_t = 10, requires = "function_details")]
+        function_max_lines: u32,
+
+        /// Show deterministic code-health metrics and findings
+        #[arg(long, conflicts_with = "function_details")]
+        health: bool,
+
+        /// Show only files with health findings
+        #[arg(long, requires = "health")]
+        only_findings: bool,
+
+        /// Limit health output to the first N files after sorting
+        #[arg(long, requires = "health")]
+        top: Option<usize>,
+
+        /// Rank health output by a specific metric
+        #[arg(long, value_enum, requires = "health")]
+        sort_by: Option<HealthSort>,
+
+        /// Emit structured JSON for --health
+        #[arg(long, requires = "health")]
+        json: bool,
     },
 
     /// Structural scan: extract functions, bindings, and exports from TypeScript/JavaScript files
     Scan(ScanArgs),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum HealthSort {
+    Severity,
+    Coupling,
+    Duplicates,
+    Size,
 }
 
 #[derive(clap::Args, Clone)]
@@ -83,6 +126,41 @@ pub struct DupesArgs {
     /// Include source text for each match
     #[arg(long)]
     pub print: bool,
+}
+
+#[derive(clap::Args, Clone)]
+pub struct SlopArgs {
+    /// Project root directory
+    #[arg(long, default_value = ".")]
+    pub root: String,
+
+    /// Git base ref that enables the three diff-only finding kinds
+    #[arg(long)]
+    pub base: Option<String>,
+
+    /// Minimum confidence to include
+    #[arg(long, value_enum, default_value_t = crate::slop::types::SlopConfidence::Medium)]
+    pub confidence: crate::slop::types::SlopConfidence,
+
+    /// Include only these finding kinds (comma-separated, repeatable)
+    #[arg(long, value_delimiter = ',')]
+    pub only: Vec<String>,
+
+    /// Exclude these finding kinds (comma-separated, repeatable)
+    #[arg(long, value_delimiter = ',')]
+    pub exclude: Vec<String>,
+
+    /// Limit findings after deterministic sorting
+    #[arg(long)]
+    pub top: Option<usize>,
+
+    /// Include test files in ordinary detector analysis
+    #[arg(long)]
+    pub include_test_files: bool,
+
+    /// Emit stable schema-versioned JSON
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(clap::Args, Clone)]
@@ -158,7 +236,55 @@ pub struct ScanArgs {
     #[arg(long, default_value_t = 3)]
     pub low_value_max_lines: u32,
 
+    /// Include ordinary small bodies and component-local TSX functions
+    #[arg(long)]
+    pub loose_low_value: bool,
+
+    /// Minimum lines for a dominant function or class
+    #[arg(long, default_value_t = 300)]
+    pub dominant_container_min_lines: u32,
+
+    /// Minimum tiny helpers beside a dominant function or class
+    #[arg(long, default_value_t = 2)]
+    pub dominant_helper_min_count: usize,
+
     /// Scan a single file instead of directory
     #[arg(long)]
     pub file: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_the_slop_command_contract() {
+        let cli = Cli::try_parse_from([
+            "scanr",
+            "slop",
+            "--root",
+            "project",
+            "--confidence",
+            "high",
+            "--only",
+            "suppression-chain,patch-stack",
+            "--exclude",
+            "dead-surface",
+            "--top",
+            "0",
+            "--include-test-files",
+            "--json",
+        ])
+        .unwrap();
+        let Commands::Slop(args) = cli.command else {
+            panic!("expected slop command");
+        };
+        assert_eq!(args.root, "project");
+        assert_eq!(args.confidence, crate::slop::types::SlopConfidence::High);
+        assert_eq!(args.only, ["suppression-chain", "patch-stack"]);
+        assert_eq!(args.exclude, ["dead-surface"]);
+        assert_eq!(args.top, Some(0));
+        assert!(args.include_test_files);
+        assert!(args.json);
+    }
 }

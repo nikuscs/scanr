@@ -63,7 +63,7 @@ pub fn function_duplicate_groups(
     files: &[SimilarityFile],
     threshold: f64,
     min_lines: u32,
-) -> Result<BTreeMap<FunctionDuplicateKey, usize>> {
+) -> Result<BTreeMap<FunctionDuplicateKey, Vec<FunctionDuplicateKey>>> {
     let pairs = compare_function_pairs(
         files,
         &DupesArgs { root: String::new(), threshold, min_lines, types: false, print: false },
@@ -93,9 +93,9 @@ pub fn function_duplicate_groups(
                 stack.extend(neighbors.iter().cloned());
             }
         }
-        let count = component.len();
-        for key in component {
-            groups.insert(key, count);
+        component.sort();
+        for key in &component {
+            groups.insert(key.clone(), component.clone());
         }
     }
     Ok(groups)

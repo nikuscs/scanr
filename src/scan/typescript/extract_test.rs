@@ -57,6 +57,8 @@ fn covers_exports_classes_object_methods_and_bindings() {
     assert!(export_names.contains("default"));
     assert!(export_names.contains("foo"));
     assert!(export_names.contains("NamedCls"));
+    assert!(result.classes.iter().any(|class| class.name == "NamedCls" && class.exported));
+    assert!(result.classes.iter().any(|class| class.name == "K" && !class.exported));
 
     let binding_names: std::collections::BTreeSet<_> =
         result.bindings.iter().map(|b| b.name.as_str()).collect();
@@ -65,6 +67,38 @@ fn covers_exports_classes_object_methods_and_bindings() {
     assert!(binding_names.contains("e"));
 
     assert!(lines.line(0) >= 1);
+}
+
+#[test]
+fn jsx_is_attributed_to_the_innermost_function() {
+    let allocator = Allocator::default();
+    let src = r"
+        function Card() {
+            const renderLabel = () => <span>Label</span>;
+            return <section>{renderLabel()}</section>;
+        }
+        function Utility() { return 1; }
+    ";
+    let st = SourceType::from_path(std::path::Path::new("view.tsx")).unwrap();
+    let ret = Parser::new(&allocator, src, st).with_options(ParseOptions::default()).parse();
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(&ret.program).semantic;
+    let result = extract_file(&ret.program, &semantic, src, FunctionKindsFilter::All);
+
+    let card =
+        result.functions.iter().find(|function| function.name.as_deref() == Some("Card")).unwrap();
+    let label = result
+        .functions
+        .iter()
+        .find(|function| function.name.as_deref() == Some("renderLabel"))
+        .unwrap();
+    let utility = result
+        .functions
+        .iter()
+        .find(|function| function.name.as_deref() == Some("Utility"))
+        .unwrap();
+    assert!(card.has_jsx());
+    assert!(label.has_jsx());
+    assert!(!utility.has_jsx());
 }
 
 #[test]
@@ -130,6 +164,9 @@ fn classifies_only_trivial_low_value_shapes() {
         function empty() {}
         const constant = () => 1;
         function wrapper(value: string) { return save(value); }
+        function directProperty(value: { id: string }) { return value.id; }
+        function chained(value: string) { return save(value).trim(); }
+        function mapped(value: { kind: string }) { return RANK[value.kind]; }
         function complex(value: number) { const next = value + 1; return next; }
     ";
     let st = SourceType::ts().with_module(true);
@@ -147,6 +184,9 @@ fn classifies_only_trivial_low_value_shapes() {
     assert_eq!(functions["empty"], Some("empty"));
     assert_eq!(functions["constant"], Some("constant_return"));
     assert_eq!(functions["wrapper"], Some("thin_wrapper"));
+    assert_eq!(functions["directProperty"], Some("property_return"));
+    assert_eq!(functions["chained"], None);
+    assert_eq!(functions["mapped"], None);
     assert_eq!(functions["complex"], None);
 }
 
