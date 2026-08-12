@@ -409,6 +409,58 @@ fn loose_dominant_rule_includes_component_local_satellites() {
 }
 
 #[test]
+fn satellite_cluster_groups_multiple_low_use_helpers_once() {
+    let mut fi = mk_fi("src/helpers.ts", &["first", "second", "manyUses"], false);
+    for function in &mut fi.functions {
+        function.exported = false;
+        function.line_end = function.line + 5;
+    }
+    fi.functions[0].low_value_reason = Some("thin_wrapper".into());
+    fi.bindings = [("first", 2usize), ("second", 1usize), ("manyUses", 3usize)]
+        .into_iter()
+        .map(|(name, refs)| BindingInfo {
+            name: name.into(),
+            kind: BindingKind::Function,
+            exported: false,
+            refs,
+            line: 1,
+            col: 1,
+        })
+        .collect();
+
+    run_rules(&["satellite_cluster".into()], &mut fi);
+    assert_eq!(fi.violations.len(), 1);
+    assert_eq!(fi.violations[0].count, 2);
+    assert_eq!(
+        fi.violations[0].details,
+        vec!["helper:first:thin_wrapper:2:6", "helper:second:single_use:1:6"]
+    );
+}
+
+#[test]
+fn satellite_cluster_requires_multiple_members_and_skips_nested_functions() {
+    let mut fi = mk_fi("src/helpers.ts", &["only", "nested"], false);
+    for function in &mut fi.functions {
+        function.exported = false;
+    }
+    fi.functions[1].parent = Some("owner".into());
+    fi.bindings = ["only", "nested"]
+        .into_iter()
+        .map(|name| BindingInfo {
+            name: name.into(),
+            kind: BindingKind::Function,
+            exported: false,
+            refs: 1,
+            line: 1,
+            col: 1,
+        })
+        .collect();
+
+    run_rules(&["satellite_cluster".into()], &mut fi);
+    assert!(fi.violations.is_empty());
+}
+
+#[test]
 fn one_exported_function_path_prefix_can_skip_file() {
     let fi = mk_fi("src/a.ts", &["a", "b"], false);
     let rule = OneExportedFunctionPerFile { path_prefix: Some("other/".into()) };

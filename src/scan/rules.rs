@@ -51,6 +51,12 @@ pub fn all_rules() -> Vec<Box<dyn Rule>> {
             helper_min_count: 2,
             max_references: 2,
         }),
+        Box::new(SatelliteCluster {
+            include_test_files: false,
+            max_lines: 8,
+            min_count: 2,
+            max_references: 2,
+        }),
     ]
 }
 
@@ -94,6 +100,12 @@ pub fn run_rules_with_options(enabled: &[String], index: &mut FileIndex, options
         container_min_lines: options.dominant_container_min_lines,
         helper_max_lines: options.low_value_max_lines,
         helper_min_count: options.dominant_helper_min_count,
+        max_references: 2,
+    }));
+    rules.push(Box::new(SatelliteCluster {
+        include_test_files: options.include_test_files,
+        max_lines: 8,
+        min_count: 2,
         max_references: 2,
     }));
 
@@ -304,6 +316,65 @@ impl Rule for LowValueLocalHelper {
         }
 
         Some(Violation { rule: self.name().to_string(), count: helpers.len(), details: helpers })
+    }
+}
+
+struct SatelliteCluster {
+    include_test_files: bool,
+    max_lines: u32,
+    min_count: usize,
+    max_references: usize,
+}
+
+impl Rule for SatelliteCluster {
+    fn name(&self) -> &'static str {
+        "satellite_cluster"
+    }
+
+    fn check(&self, index: &FileIndex) -> Option<Violation> {
+        if !self.include_test_files && is_test_path(&index.path) {
+            return None;
+        }
+        let mut satellites = index
+            .functions
+            .iter()
+            .filter(|function| {
+                function.role(&index.path) == FunctionRole::Helper
+                    && function.parent.is_none()
+                    && !function.exported
+                    && function_line_count(function) <= self.max_lines
+            })
+            .filter_map(|function| {
+                let name = function.name.as_ref()?;
+                let binding = index.bindings.iter().find(|binding| {
+                    binding.name == *name
+                        && binding.line == function.line
+                        && matches!(binding.kind, BindingKind::Const | BindingKind::Function)
+                })?;
+                let eligible_use = (1..=self.max_references).contains(&binding.refs);
+                let eligible_body = function.low_value_reason.is_some() || binding.refs == 1;
+                (eligible_use && eligible_body).then(|| {
+                    (
+                        function.line,
+                        format!(
+                            "helper:{name}:{}:{}:{}",
+                            function.low_value_reason.as_deref().unwrap_or("single_use"),
+                            binding.refs,
+                            function_line_count(function)
+                        ),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        if satellites.len() < self.min_count {
+            return None;
+        }
+        satellites.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
+        Some(Violation {
+            rule: self.name().to_string(),
+            count: satellites.len(),
+            details: satellites.into_iter().map(|(_, detail)| detail).collect(),
+        })
     }
 }
 
