@@ -192,6 +192,33 @@ pub struct BindingInfo {
     pub col: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum TypeDeclKind {
+    #[serde(rename = "interface")]
+    Interface,
+    #[serde(rename = "type")]
+    TypeAlias,
+}
+
+impl TypeDeclKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Interface => "interface",
+            Self::TypeAlias => "type",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TypeInfo {
+    pub name: String,
+    pub kind: TypeDeclKind,
+    pub exported: bool,
+    pub line: u32,
+    pub col: u32,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ExportInfo {
     pub name: String,
@@ -216,6 +243,7 @@ pub struct FileIndex {
     pub functions: Vec<FunctionInfo>,
     pub classes: Vec<ClassInfo>,
     pub bindings: Vec<BindingInfo>,
+    pub types: Vec<TypeInfo>,
     pub exports: Vec<ExportInfo>,
     pub violations: Vec<Violation>,
     pub parse_errors: usize,

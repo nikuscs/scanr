@@ -30,8 +30,60 @@ pub fn write_result<W: Write>(
     Ok(())
 }
 
+pub fn write_schema<W: Write>(mode: OutputMode, w: &mut W) -> anyhow::Result<()> {
+    let schema = match mode {
+        OutputMode::Compact => serde_json::json!({
+            "mode": "compact",
+            "ver": 1,
+            "fields": {
+                "f": ["file", "line", "col", "name", "exported", "kind", "parent", "captures", "low_value_reason"],
+                "b": ["file", "line", "col", "name", "kind", "refs"],
+                "t": ["file", "line", "col", "name", "exported", "kind"],
+                "x": ["file", "name", "kind_code"],
+                "viol": ["file", "rule", "count", "details"],
+                "err": ["message"]
+            },
+            "export_kind_codes": { "1": "named", "2": "default", "3": "reexport" },
+            "type_kinds": ["interface", "type"]
+        }),
+        OutputMode::Verbose => serde_json::json!({
+            "mode": "verbose",
+            "ver": 1,
+            "fields": {
+                "functions": ["file", "name", "parent", "captures", "lowValueReason", "role", "kind", "exported", "isAsync", "isGenerator", "span"],
+                "bindings": ["file", "name", "kind", "exported", "refs", "decl"],
+                "types": ["file", "name", "kind", "exported", "decl"],
+                "exports": ["file", "name", "kindCode"],
+                "violations": ["file", "rule", "count", "details"],
+                "errors": ["message"]
+            },
+            "export_kind_codes": { "1": "named", "2": "default", "3": "reexport" },
+            "type_kinds": ["interface", "type"]
+        }),
+        OutputMode::Files => serde_json::json!({
+            "mode": "files",
+            "ver": 1,
+            "fields": {
+                "files": "{ path: [dottedFunctionName, ...] }"
+            }
+        }),
+        OutputMode::Folders => serde_json::json!({
+            "mode": "folders",
+            "ver": 1,
+            "fields": {
+                "folders": "{ dir: { functions, names } }"
+            }
+        }),
+    };
+    serde_json::to_writer(w, &schema)?;
+    Ok(())
+}
+
 type CompactFunction =
     (String, u32, u32, String, u8, String, Option<String>, Vec<String>, Option<String>);
+
+/// Types: [file, line, col, name, exported(0/1), kind]
+type CompactType = (String, u32, u32, String, u8, String);
 
 #[derive(Serialize)]
 struct CompactOutput {
@@ -41,6 +93,8 @@ struct CompactOutput {
     f: Vec<CompactFunction>,
     /// Bindings: [file, line, col, name, kind, refs]
     b: Vec<(String, u32, u32, String, String, usize)>,
+    /// Types: [file, line, col, name, exported(0/1), kind]
+    t: Vec<CompactType>,
     /// Exports: `[file, name, kind_code]`
     x: Vec<(String, String, u8)>,
     /// Violations: [file, rule, count, details]
@@ -54,16 +108,18 @@ impl From<&ScanResult> for CompactOutput {
     fn from(r: &ScanResult) -> Self {
         let total_functions = r.file_indices.iter().map(|fi| fi.functions.len()).sum();
         let total_bindings = r.file_indices.iter().map(|fi| fi.bindings.len()).sum();
+        let total_types = r.file_indices.iter().map(|fi| fi.types.len()).sum();
         let total_exports = r.file_indices.iter().map(|fi| fi.exports.len()).sum();
         let total_violations = r.file_indices.iter().map(|fi| fi.violations.len()).sum();
-        let mut f = Vec::with_capacity(total_functions);
-        let mut b = Vec::with_capacity(total_bindings);
-        let mut x = Vec::with_capacity(total_exports);
+        let mut functions = Vec::with_capacity(total_functions);
+        let mut bindings = Vec::with_capacity(total_bindings);
+        let mut types = Vec::with_capacity(total_types);
+        let mut exports = Vec::with_capacity(total_exports);
         let mut viol = Vec::with_capacity(total_violations);
 
         for fi in &r.file_indices {
             for func in &fi.functions {
-                f.push((
+                functions.push((
                     fi.path.clone(),
                     func.line,
                     func.col,
@@ -76,7 +132,7 @@ impl From<&ScanResult> for CompactOutput {
                 ));
             }
             for binding in &fi.bindings {
-                b.push((
+                bindings.push((
                     fi.path.clone(),
                     binding.line,
                     binding.col,
@@ -85,8 +141,18 @@ impl From<&ScanResult> for CompactOutput {
                     binding.refs,
                 ));
             }
+            for type_info in &fi.types {
+                types.push((
+                    fi.path.clone(),
+                    type_info.line,
+                    type_info.col,
+                    type_info.name.clone(),
+                    u8::from(type_info.exported),
+                    type_info.kind.as_str().to_string(),
+                ));
+            }
             for exp in &fi.exports {
-                x.push((fi.path.clone(), exp.name.clone(), exp.kind_code));
+                exports.push((fi.path.clone(), exp.name.clone(), exp.kind_code));
             }
             for violation in &fi.violations {
                 viol.push((
@@ -98,7 +164,16 @@ impl From<&ScanResult> for CompactOutput {
             }
         }
 
-        Self { ver: r.ver, stats: r.stats.clone(), f, b, x, viol, err: r.errors.clone() }
+        Self {
+            ver: r.ver,
+            stats: r.stats.clone(),
+            f: functions,
+            b: bindings,
+            t: types,
+            x: exports,
+            viol,
+            err: r.errors.clone(),
+        }
     }
 }
 
@@ -110,6 +185,7 @@ struct VerboseOutput {
     stats: Stats,
     functions: Vec<VerboseFunction>,
     bindings: Vec<VerboseBinding>,
+    types: Vec<VerboseType>,
     exports: Vec<VerboseExport>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     violations: Vec<VerboseViolation>,
@@ -158,6 +234,16 @@ struct VerboseBinding {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct VerboseType {
+    file: String,
+    name: String,
+    kind: String,
+    exported: bool,
+    decl: VerbosePos,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct VerboseExport {
     file: String,
     name: String,
@@ -176,10 +262,12 @@ impl From<&ScanResult> for VerboseOutput {
     fn from(r: &ScanResult) -> Self {
         let total_functions = r.file_indices.iter().map(|fi| fi.functions.len()).sum();
         let total_bindings = r.file_indices.iter().map(|fi| fi.bindings.len()).sum();
+        let total_types = r.file_indices.iter().map(|fi| fi.types.len()).sum();
         let total_exports = r.file_indices.iter().map(|fi| fi.exports.len()).sum();
         let total_violations = r.file_indices.iter().map(|fi| fi.violations.len()).sum();
         let mut functions = Vec::with_capacity(total_functions);
         let mut bindings = Vec::with_capacity(total_bindings);
+        let mut types = Vec::with_capacity(total_types);
         let mut exports = Vec::with_capacity(total_exports);
         let mut violations = Vec::with_capacity(total_violations);
 
@@ -212,6 +300,15 @@ impl From<&ScanResult> for VerboseOutput {
                     decl: VerbosePos { line: binding.line, col: binding.col },
                 });
             }
+            for type_info in &fi.types {
+                types.push(VerboseType {
+                    file: fi.path.clone(),
+                    name: type_info.name.clone(),
+                    kind: type_info.kind.as_str().to_string(),
+                    exported: type_info.exported,
+                    decl: VerbosePos { line: type_info.line, col: type_info.col },
+                });
+            }
             for exp in &fi.exports {
                 exports.push(VerboseExport {
                     file: fi.path.clone(),
@@ -235,6 +332,7 @@ impl From<&ScanResult> for VerboseOutput {
             stats: r.stats.clone(),
             functions,
             bindings,
+            types,
             exports,
             violations,
             errors: r.errors.clone(),

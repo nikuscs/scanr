@@ -251,11 +251,24 @@ pub struct ScanArgs {
     /// Scan a single file instead of directory
     #[arg(long)]
     pub file: Option<String>,
+
+    /// Print the selected mode's output field layout and exit
+    #[arg(long)]
+    pub schema: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_scan_schema_flag() {
+        let cli = Cli::try_parse_from(["scanr", "scan", "--schema"]).unwrap();
+        let Commands::Scan(args) = cli.command else {
+            panic!("expected scan command");
+        };
+        assert!(args.schema);
+    }
 
     #[test]
     fn parses_the_slop_command_contract() {

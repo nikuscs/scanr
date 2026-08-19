@@ -39,6 +39,7 @@ fn mk_fi(path: &str, fn_names: &[&str], binding_unused: bool) -> FileIndex {
         functions,
         classes: vec![],
         bindings,
+        types: vec![],
         exports: vec![],
         violations: vec![],
         parse_errors: 0,

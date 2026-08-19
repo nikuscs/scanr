@@ -7,6 +7,14 @@ use crate::scan::types::{ScanResult, Stats};
 use crate::scan::{self, ScanConfig};
 
 pub fn run(args: &ScanArgs) -> Result<()> {
+    if args.schema {
+        let stdout = std::io::stdout();
+        let mut handle = stdout.lock();
+        output::write_schema(args.mode, &mut handle)?;
+        handle.write_all(b"\n")?;
+        return Ok(());
+    }
+
     let root = std::path::Path::new(&args.root);
 
     let mut result = if let Some(file_path) = &args.file {

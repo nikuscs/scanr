@@ -1,7 +1,7 @@
 use super::*;
 use crate::scan::types::{
     BindingInfo, BindingKind, ExportInfo, FileIndex, FunctionContent, FunctionInfo, FunctionKind,
-    ScanResult, Stats, Violation,
+    ScanResult, Stats, TypeDeclKind, TypeInfo, Violation,
 };
 use crate::slop::types::FileFacts;
 
@@ -61,6 +61,7 @@ fn scan_result_example() -> ScanResult {
             line: 1,
             col: 1,
         }],
+        types: vec![],
         exports: vec![],
         violations: vec![],
         parse_errors: 0,
@@ -84,6 +85,7 @@ fn scan_result_example() -> ScanResult {
         }],
         classes: vec![],
         bindings: vec![],
+        types: vec![],
         exports: vec![],
         violations: vec![],
         parse_errors: 0,
@@ -159,6 +161,7 @@ fn folders_mode_uses_dot_names() {
         ],
         classes: vec![],
         bindings: vec![],
+        types: vec![],
         exports: vec![],
         violations: vec![],
         parse_errors: 0,
@@ -227,6 +230,7 @@ fn dot_names_for_nested_methods() {
         ],
         classes: vec![],
         bindings: vec![],
+        types: vec![],
         exports: vec![],
         violations: vec![],
         parse_errors: 0,
@@ -296,6 +300,7 @@ fn dot_names_picks_nearest_parent() {
         ],
         classes: vec![],
         bindings: vec![],
+        types: vec![],
         exports: vec![],
         violations: vec![],
         parse_errors: 0,
@@ -358,6 +363,7 @@ fn write_result_emits_valid_json_all_modes() {
             line: 1,
             col: 1,
         }],
+        types: vec![],
         exports: vec![],
         violations: vec![],
         parse_errors: 0,
@@ -418,6 +424,7 @@ fn verbose_output_includes_exports_and_folder_none_parent_path() {
         }],
         classes: vec![],
         bindings: vec![],
+        types: vec![],
         exports: vec![ExportInfo { name: "default".into(), kind_code: 2 }],
         violations: vec![],
         parse_errors: 0,
@@ -439,4 +446,55 @@ fn verbose_output_includes_exports_and_folder_none_parent_path() {
 
     let folders = FoldersOutput::from(&r);
     assert!(folders.folders.contains_key("."));
+}
+
+#[test]
+fn compact_and_verbose_outputs_include_types() {
+    let mut result = scan_result_example();
+    result.file_indices[0].types.push(TypeInfo {
+        name: "Range".into(),
+        kind: TypeDeclKind::Interface,
+        exported: true,
+        line: 4,
+        col: 8,
+    });
+    result.file_indices[0].types.push(TypeInfo {
+        name: "Local".into(),
+        kind: TypeDeclKind::TypeAlias,
+        exported: false,
+        line: 9,
+        col: 6,
+    });
+
+    let mut compact = Vec::new();
+    write_result(&result, OutputMode::Compact, &mut compact).unwrap();
+    let compact: serde_json::Value = serde_json::from_slice(&compact).unwrap();
+    assert_eq!(compact["t"][0], serde_json::json!(["dir/a.ts", 4, 8, "Range", 1, "interface"]));
+    assert_eq!(compact["t"][1], serde_json::json!(["dir/a.ts", 9, 6, "Local", 0, "type"]));
+
+    let mut verbose = Vec::new();
+    write_result(&result, OutputMode::Verbose, &mut verbose).unwrap();
+    let verbose: serde_json::Value = serde_json::from_slice(&verbose).unwrap();
+    assert_eq!(verbose["types"][0]["name"], "Range");
+    assert_eq!(verbose["types"][0]["kind"], "interface");
+    assert_eq!(verbose["types"][0]["exported"], true);
+    assert_eq!(verbose["types"][1]["name"], "Local");
+    assert_eq!(verbose["types"][1]["kind"], "type");
+    assert_eq!(verbose["types"][1]["exported"], false);
+}
+
+#[test]
+fn compact_schema_describes_positional_arrays() {
+    let mut buf = Vec::new();
+    write_schema(OutputMode::Compact, &mut buf).unwrap();
+    let schema: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+    assert_eq!(schema["mode"], "compact");
+    assert_eq!(schema["ver"], 1);
+    assert_eq!(
+        schema["fields"]["t"],
+        serde_json::json!(["file", "line", "col", "name", "exported", "kind"])
+    );
+    assert_eq!(schema["fields"]["f"][4], "exported");
+    assert_eq!(schema["fields"]["x"], serde_json::json!(["file", "name", "kind_code"]));
+    assert_eq!(schema["export_kind_codes"]["1"], "named");
 }

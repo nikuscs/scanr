@@ -1,5 +1,5 @@
 use super::*;
-use crate::scan::types::{FunctionKind, FunctionKindsFilter, LineIndex};
+use crate::scan::types::{FunctionKind, FunctionKindsFilter, LineIndex, TypeDeclKind};
 use oxc::allocator::Allocator;
 use oxc::parser::{ParseOptions, Parser};
 use oxc::semantic::SemanticBuilder;
@@ -99,6 +99,40 @@ fn jsx_is_attributed_to_the_innermost_function() {
     assert!(card.has_jsx());
     assert!(label.has_jsx());
     assert!(!utility.has_jsx());
+}
+
+#[test]
+fn type_declarations_are_collected_with_export_status() {
+    let allocator = Allocator::default();
+    let src = r"
+        export interface Range { start: number }
+        export type Confidence = 'low' | 'high'
+        interface Internal { x: number }
+        type Local = string
+    ";
+    let st = SourceType::ts().with_module(true);
+    let ret = Parser::new(&allocator, src, st).with_options(ParseOptions::default()).parse();
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(&ret.program).semantic;
+    let result = extract_file(&ret.program, &semantic, src, FunctionKindsFilter::All);
+
+    let by_name: std::collections::BTreeMap<_, _> =
+        result.types.iter().map(|t| (t.name.as_str(), t)).collect();
+    assert_eq!(by_name.len(), 4);
+    assert_eq!(by_name["Range"].kind, TypeDeclKind::Interface);
+    assert!(by_name["Range"].exported);
+    assert_eq!(by_name["Confidence"].kind, TypeDeclKind::TypeAlias);
+    assert!(by_name["Confidence"].exported);
+    assert_eq!(by_name["Internal"].kind, TypeDeclKind::Interface);
+    assert!(!by_name["Internal"].exported);
+    assert_eq!(by_name["Local"].kind, TypeDeclKind::TypeAlias);
+    assert!(!by_name["Local"].exported);
+
+    let export_names: std::collections::BTreeSet<_> =
+        result.exports.iter().map(|e| e.name.as_str()).collect();
+    assert!(export_names.contains("Range"));
+    assert!(export_names.contains("Confidence"));
+    assert!(!export_names.contains("Internal"));
+    assert!(!export_names.contains("Local"));
 }
 
 #[test]

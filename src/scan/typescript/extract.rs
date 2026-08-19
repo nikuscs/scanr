@@ -5,7 +5,7 @@ use oxc::ast::ast::{
     ExportDeclaration, ExportDefaultDeclaration, ExportDefaultDeclarationKind,
     ExportNamedDeclaration, Expression, FormalParameters, Function, FunctionBody, FunctionType,
     JSXElement, JSXFragment, MethodDefinition, MethodDefinitionKind, ObjectProperty, PropertyKind,
-    Statement, VariableDeclarator,
+    Statement, TSInterfaceDeclaration, TSTypeAliasDeclaration, VariableDeclarator,
 };
 use oxc::ast_visit::{self, Visit};
 use oxc::semantic::Semantic;
@@ -14,13 +14,14 @@ use oxc::syntax::symbol::SymbolFlags;
 
 use crate::scan::types::{
     BindingInfo, BindingKind, ClassInfo, EXPORT_DEFAULT, EXPORT_NAMED, ExportInfo, FunctionContent,
-    FunctionInfo, FunctionKind, FunctionKindsFilter, LineIndex,
+    FunctionInfo, FunctionKind, FunctionKindsFilter, LineIndex, TypeDeclKind, TypeInfo,
 };
 
 pub struct ExtractionResult {
     pub functions: Vec<FunctionInfo>,
     pub classes: Vec<ClassInfo>,
     pub bindings: Vec<BindingInfo>,
+    pub types: Vec<TypeInfo>,
     pub exports: Vec<ExportInfo>,
 }
 
@@ -35,6 +36,7 @@ pub fn extract_file(
     let mut collector = Collector {
         functions: Vec::new(),
         classes: Vec::new(),
+        types: Vec::new(),
         exported_names: HashSet::new(),
         exports: Vec::new(),
         lines: &lines,
@@ -45,10 +47,22 @@ pub fn extract_file(
     };
     collector.visit_program(program);
 
+    for type_info in &mut collector.types {
+        if collector.exported_names.contains(&type_info.name) {
+            type_info.exported = true;
+        }
+    }
+
     let bindings = extract_bindings(semantic, &lines, &collector.exported_names);
     let functions = enrich_functions(collector.functions, semantic);
 
-    ExtractionResult { functions, classes: collector.classes, bindings, exports: collector.exports }
+    ExtractionResult {
+        functions,
+        classes: collector.classes,
+        bindings,
+        types: collector.types,
+        exports: collector.exports,
+    }
 }
 
 struct FunctionRecord {
@@ -60,6 +74,7 @@ struct FunctionRecord {
 struct Collector<'s> {
     functions: Vec<FunctionRecord>,
     classes: Vec<ClassInfo>,
+    types: Vec<TypeInfo>,
     exported_names: HashSet<String>,
     exports: Vec<ExportInfo>,
     lines: &'s LineIndex,
@@ -111,6 +126,16 @@ impl Collector<'_> {
     fn record_export(&mut self, name: &str, kind_code: u8) {
         self.exported_names.insert(name.to_string());
         self.exports.push(ExportInfo { name: name.to_string(), kind_code });
+    }
+
+    fn push_type(&mut self, name: &str, kind: TypeDeclKind, span_start: u32) {
+        self.types.push(TypeInfo {
+            name: name.to_string(),
+            kind,
+            exported: self.in_export || self.exported_names.contains(name),
+            line: self.lines.line(span_start),
+            col: self.lines.col(span_start),
+        });
     }
 }
 
@@ -292,6 +317,16 @@ impl<'a> Visit<'a> for Collector<'_> {
             ast_visit::walk::walk_object_property(self, it);
         }
     }
+
+    fn visit_ts_interface_declaration(&mut self, it: &TSInterfaceDeclaration<'a>) {
+        self.push_type(it.id.name.as_str(), TypeDeclKind::Interface, it.span.start);
+        ast_visit::walk::walk_ts_interface_declaration(self, it);
+    }
+
+    fn visit_ts_type_alias_declaration(&mut self, it: &TSTypeAliasDeclaration<'a>) {
+        self.push_type(it.id.name.as_str(), TypeDeclKind::TypeAlias, it.span.start);
+        ast_visit::walk::walk_ts_type_alias_declaration(self, it);
+    }
 }
 
 impl Collector<'_> {
@@ -327,6 +362,12 @@ impl Collector<'_> {
             }
             Declaration::TSEnumDeclaration(e) => {
                 self.record_export(e.id.name.as_str(), kind_code);
+            }
+            Declaration::TSInterfaceDeclaration(i) => {
+                self.record_export(i.id.name.as_str(), kind_code);
+            }
+            Declaration::TSTypeAliasDeclaration(t) => {
+                self.record_export(t.id.name.as_str(), kind_code);
             }
             _ => {}
         }
