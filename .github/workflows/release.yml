@@ -106,16 +106,59 @@ jobs:
           echo "tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
           echo "New version: $NEW_VERSION"
 
-      - name: Create tag
+      - name: Write version, commit, and tag
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
+          NEW_TAG: ${{ steps.bump.outputs.tag }}
         run: |
-          if git ls-remote --tags origin "refs/tags/${{ steps.bump.outputs.tag }}" | grep -q "${{ steps.bump.outputs.tag }}"; then
-            echo "::error::Tag ${{ steps.bump.outputs.tag }} already exists on origin"
+          if git ls-remote --tags origin "refs/tags/${NEW_TAG}" | grep -q "${NEW_TAG}"; then
+            echo "::error::Tag ${NEW_TAG} already exists on origin"
             exit 1
           fi
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+          import os
+          import re
+
+          ver = os.environ["NEW_VERSION"]
+
+          cargo_toml = Path("Cargo.toml")
+          text, n = re.subn(r'(?m)^version = "[^"]+"', f'version = "{ver}"', cargo_toml.read_text(), count=1)
+          if n != 1:
+              raise SystemExit(f"expected 1 Cargo.toml package version, found {n}")
+          cargo_toml.write_text(text)
+
+          cargo_lock = Path("Cargo.lock")
+          text, n = re.subn(
+              r'(name = "scanr"\n)version = "[^"]+"',
+              rf'\1version = "{ver}"',
+              cargo_lock.read_text(),
+              count=1,
+          )
+          if n != 1:
+              raise SystemExit(f"expected 1 Cargo.lock scanr version, found {n}")
+          cargo_lock.write_text(text)
+
+          plugin = Path("plugin/.claude-plugin/plugin.json")
+          data = json.loads(plugin.read_text())
+          data["version"] = ver
+          plugin.write_text(json.dumps(data, indent=2) + "\n")
+
+          marketplace = Path(".claude-plugin/marketplace.json")
+          data = json.loads(marketplace.read_text())
+          data["plugins"][0]["version"] = ver
+          marketplace.write_text(json.dumps(data, indent=2) + "\n")
+          PY
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${{ steps.bump.outputs.tag }}" -m "Release ${{ steps.bump.outputs.tag }}"
-          git push origin "${{ steps.bump.outputs.tag }}"
+          git add Cargo.toml Cargo.lock plugin/.claude-plugin/plugin.json .claude-plugin/marketplace.json
+          git commit -m "chore: bump version to ${NEW_VERSION}"
+          git push origin HEAD:main
+          git tag -a "${NEW_TAG}" -m "Release ${NEW_TAG}"
+          git push origin "${NEW_TAG}"
 
   build:
     name: Build (${{ matrix.target }})
