@@ -1,5 +1,5 @@
 ---
-name: search
+name: ts-code-scan
 description: Offline code search, structural TS/JS analysis, duplicate detection, and project tree overview.
 argument-hint: [search pattern]
 allowed-tools: Bash, Read

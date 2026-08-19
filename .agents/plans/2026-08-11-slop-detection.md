@@ -576,7 +576,7 @@ Diff findings:
 | `src/slop/output.rs` | implement Markdown table and JSON writers | human/machine output |
 | `src/commands/slop.rs` | filter, sort, limit, and write | command completion |
 | `README.md` | document semantics, flags, kinds, confidence, schema | public API |
-| `plugin/skills/search/SKILL.md` | route slop requests and require plain-language tables | agent behavior |
+| `plugin/skills/ts-code-scan/SKILL.md` | route slop requests and require plain-language tables | agent behavior |
 | `docs/real-world-tests.md` | add slop calibration checklist | repeatable validation |
 
 **Final shape:**
