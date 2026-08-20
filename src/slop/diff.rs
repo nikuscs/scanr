@@ -237,7 +237,7 @@ fn parse_added_ranges(bytes: &[u8]) -> Result<Vec<LineRange>> {
     for line in patch.lines().filter(|line| line.starts_with("@@ ")) {
         let Some(new_range) = line.split_whitespace().nth(2) else { continue };
         let Some(new_range) = new_range.strip_prefix('+') else { continue };
-        let (start, count) = new_range.split_once(',').map_or((new_range, "1"), |parts| parts);
+        let (start, count) = new_range.split_once(',').unwrap_or((new_range, "1"));
         let Ok(start) = start.parse::<u32>() else { continue };
         let Ok(count) = count.parse::<u32>() else { continue };
         if count == 0 {
