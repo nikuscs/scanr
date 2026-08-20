@@ -1,6 +1,6 @@
 ---
 name: ts-code-scan
-description: "slop, inventory, refs, census, dupes, search, and tree for offline TypeScript and JavaScript"
+description: "slop, inventory of constants/functions/types, refs, census, dupes, search, and tree for offline TypeScript and JavaScript"
 allowed-tools: Bash, Read
 ---
 
@@ -13,17 +13,17 @@ If `scanr` is missing: `brew install nikuscs/tap/scanr`. Pick one command, then 
 | Literal name or text | `scanr search` |
 | File by path | `scanr search --path` |
 | Repository shape | `scanr tree` |
-| Name inventory of a folder | `scanr scan --mode inventory` |
+| List constants, functions, types, components, hooks, classes, enums, or exports | `scanr scan --mode inventory` |
 | Usages of a declaration | `scanr refs <name>` |
 | Hoistable, capturing, low-value, or duplicate functions | `scanr tree --functions` |
 | Health hotspots (complexity, coupling, size, fan-out) | `scanr tree --health --only-findings --top 20` |
 | Nested component/function tree with explanations | `scanr tree --functions --function-details` |
-| Functions, bindings, types, exports, captures, violations | `scanr scan` |
+| Lines, captures, export flags, or rule violations after inventory | `scanr scan` compact or verbose |
 | Export census before a mass rename | `scanr scan --mode inventory` then compact — **Refactor census** |
 | Similar functions or types | `scanr dupes` |
 | Slop, reinvention, test-theater, or diff-inflation evidence | `scanr slop`; add `--base <ref>` only for tracked diff evidence |
 
-Start with `--mode inventory`. Then `scanr refs <name>` for usages. Use compact/verbose/`--file` only after you know which names matter. Health metrics stay on `tree --health`. Slop detector evidence stays on `slop`.
+Name lists and counts come from `--mode inventory`. Summarize the JSON keys; do not stream compact or verbose for a constants/functions/types list. Then `scanr refs <name>` for usages. Compact/verbose/`--file` only after you know which names matter. Health metrics stay on `tree --health`. Slop detector evidence stays on `slop`.
 
 `--function-details` is the one tree when the user wants files, React components, nested functions, ownership, line counts, or cross-component similarities together. Return that tree as printed. Treat `--health` severity as threshold evidence and state the concrete metrics behind any recommendation.
 
