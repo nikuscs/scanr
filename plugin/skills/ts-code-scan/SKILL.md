@@ -1,57 +1,65 @@
 ---
 name: ts-code-scan
-description: "slop, inventory of constants/functions/types, refs, census, dupes, search, and tree for offline TypeScript and JavaScript"
+description: "constants, types, functions, tree, slop, refs, census, dupes, and search for offline TypeScript and JavaScript"
 allowed-tools: Bash, Read
 ---
 
-## Command selection
+If `scanr` is missing: `brew install nikuscs/tap/scanr`. Presenting findings to a human → [REPORTING.md](REPORTING.md).
 
-If `scanr` is missing: `brew install nikuscs/tap/scanr`. Pick one command, then `scanr <cmd> --help` for flags. Presenting findings to a human → [REPORTING.md](REPORTING.md).
-
-| Ask | Command |
-| --- | --- |
-| Literal name or text | `scanr search` |
-| File by path | `scanr search --path` |
-| Repository shape | `scanr tree` |
-| List constants, functions, types, components, hooks, classes, enums, or exports | `scanr scan --mode inventory` |
-| Usages of a declaration | `scanr refs <name>` |
-| Hoistable, capturing, low-value, or duplicate functions | `scanr tree --functions` |
-| Health hotspots (complexity, coupling, size, fan-out) | `scanr tree --health --only-findings --top 20` |
-| Nested component/function tree with explanations | `scanr tree --functions --function-details` |
-| Lines, captures, export flags, or rule violations after inventory | `scanr scan` compact or verbose |
-| Export census before a mass rename | `scanr scan --mode inventory` then compact — **Refactor census** |
-| Similar functions or types | `scanr dupes` |
-| Slop, reinvention, test-theater, or diff-inflation evidence | `scanr slop`; add `--base <ref>` only for tracked diff evidence |
-
-Name lists and counts come from `--mode inventory`. Summarize the JSON keys; do not stream compact or verbose for a constants/functions/types list. Then `scanr refs <name>` for usages. Compact/verbose/`--file` only after you know which names matter. Health metrics stay on `tree --health`. Slop detector evidence stays on `slop`.
-
-`--function-details` is the one tree when the user wants files, React components, nested functions, ownership, line counts, or cross-component similarities together. Return that tree as printed. Treat `--health` severity as threshold evidence and state the concrete metrics behind any recommendation.
-
-## Name inventory
+For any folder, run **one** inventory (not verbose, not compact, not `head`):
 
 ```bash
 scanr scan --mode inventory --root <path>
 ```
 
-Add `--lines` for source lines. Constant `kind` is `primitive` or `arrow`. `components` / `hooks` are the React role subset of functions.
+Done when `stats.parsed == stats.files` and `stats.errors == 0`. List nonzero `skipped`/`errors`. Then answer from the JSON keys below. Add `--lines` only if the user wants line numbers.
 
-The inventory is complete when `stats.parsed == stats.files` and `stats.errors == 0`. List every nonzero `skipped` or `errors` value.
+## Get all constants
 
-## Refs
+Use `constants`. Each row is `{file, name, kind}` where `kind` is `primitive` or `arrow` (`const Foo = () => {}` is `arrow`).
+
+Counts: `constants.length`, split by `kind`. A “quick list” is the `name`s, or `UPPER_SNAKE` names if they want real constants not hook locals.
+
+## Get all types
+
+Use `types`. Each row is `{file, name, kind}` where `kind` is `interface` or `type`.
+
+## Get all functions / components / hooks / classes / enums / exports
+
+Same inventory JSON:
+
+- `functions` — named functions (dotted if nested)
+- `components` — React components (`.tsx` + JSX + Uppercase)
+- `hooks` — declarations named `use` + uppercase, not `useState` *calls*
+- `classes`
+- `enums`
+- `exports`
+
+## Get a tree
 
 ```bash
-scanr refs Card --root <path>
+scanr tree --root <path>
 ```
 
-Name-level oxc + import remapping, not tsserver find-all-references. Usages exclude the declaration line.
+`--path <subdir>` to focus. `--functions` for function markers. `--function-details` when they want nested components/functions explained. `--health --only-findings --top 20` for hotspots. Return the command output as printed.
+
+## Usages of a name
+
+```bash
+scanr refs <name> --root <path>
+```
+
+Name-level oxc + import remapping, not tsserver. Usages exclude the declaration line.
+
+## After names are known
+
+Compact or verbose `scanr scan` for lines, captures, export flags, violations. `scanr scan --schema` for compact field layout. `scanr search "<name>" --json` for a literal hunt. `scanr dupes` for similar functions/types. `scanr slop` for slop evidence (`--base <ref>` only for tracked diff kinds).
 
 ## Refactor census
 
-1. `scanr scan --mode inventory` for names.
-2. `scanr scan --schema` when the compact field layout is unknown.
-3. `scanr scan` (compact) for lines, export flags, captures.
-4. The census is complete when `stats.parsed == stats.files` and `stats.errors == 0`. List every nonzero `skipped` or `errors` value, and the `err` messages.
-5. Build the From→To table from inventory names, then compact `f` / `t` / `x` when you need `exported` or positions. Compact `b` has no exported flag — join to `x` by name.
+1. Inventory for names.
+2. Compact scan for `exported` / positions (`f`, `t`, `x`). Compact `b` has no exported flag — join to `x` by name.
+3. Done when `stats.parsed == stats.files` and `stats.errors == 0`.
 
 ## Slop kinds
 
@@ -59,6 +67,4 @@ Name-level oxc + import remapping, not tsserver find-all-references. Usages excl
 
 The first six are High. The rest are Medium. The last three are diff-only and need `--base`.
 
-`--confidence` is a minimum. `--exclude` wins over `--only`. Filters apply after analysis. Markdown is the default; JSON is schema version 1.
-
-With `--base`, staged and unstaged tracked content is compared to the resolved commit, untracked files are excluded, and non-diff findings still cover the whole root. Dead-surface wording: no analyzed-project references were resolved.
+`--confidence` is a minimum. `--exclude` wins over `--only`. Dead-surface wording: no analyzed-project references were resolved.
