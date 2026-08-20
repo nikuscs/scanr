@@ -1,7 +1,7 @@
 {
   "name": "scanr",
   "description": "Offline TypeScript/JavaScript analysis, grep, similarity detection, and project tree views",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "author": {
     "name": "nikuscs"
   },
