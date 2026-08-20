@@ -1,6 +1,6 @@
 ---
 name: ts-code-scan
-description: scanr CLI for offline TS/JS analysis: slop review signals, export census for renames/refactors, duplicate and similar-function detection, structural scan, content search, tree overview.
+description: "scanr CLI for offline TS/JS analysis: slop review signals, export census for renames/refactors, duplicate and similar-function detection, structural scan, content search, tree overview."
 argument-hint: [search pattern]
 allowed-tools: Bash, Read
 ---
