@@ -18,6 +18,12 @@ A fast, deterministic static-analysis and search CLI for TypeScript and JavaScri
 ## Install
 
 ```bash
+brew install nikuscs/tap/scanr
+```
+
+Or with Cargo:
+
+```bash
 cargo install --git https://github.com/nikuscs/scanr
 ```
 
