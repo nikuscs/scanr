@@ -6,7 +6,7 @@ allowed-tools: Bash, Read
 
 ## Command selection
 
-Pick one command, then `scanr <cmd> --help` for flags. Presenting findings to a human → [REPORTING.md](REPORTING.md).
+If `scanr` is missing: `brew install nikuscs/tap/scanr`. Pick one command, then `scanr <cmd> --help` for flags. Presenting findings to a human → [REPORTING.md](REPORTING.md).
 
 | Ask | Command |
 | --- | --- |
