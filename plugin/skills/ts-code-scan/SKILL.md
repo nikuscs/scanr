@@ -1,6 +1,6 @@
 ---
 name: ts-code-scan
-description: "scanr CLI for offline TS/JS analysis: slop review signals, export census for renames/refactors, duplicate and similar-function detection, structural scan, content search, tree overview."
+description: "scanr CLI for offline TS/JS analysis: slop review signals, name inventory for functions/constants/types, declaration usage backtrace, export census for renames/refactors, duplicate and similar-function detection, structural scan, content search, tree overview."
 argument-hint: [search pattern]
 allowed-tools: Bash, Read
 ---
@@ -22,25 +22,48 @@ Pick one command, then `scanr <cmd> --help` for flags. Presenting findings to a 
 | Literal name or text | `scanr search` |
 | File by path | `scanr search --path` |
 | Repository shape | `scanr tree` |
+| Name inventory of a folder | `scanr scan --mode inventory` |
+| Usages of a declaration | `scanr refs <name>` |
 | Hoistable, capturing, low-value, or duplicate functions | `scanr tree --functions` |
 | Health hotspots (complexity, coupling, size, fan-out) | `scanr tree --health --only-findings --top 20` |
 | Nested component/function tree with explanations | `scanr tree --functions --function-details --function-min-lines 3 --function-max-lines 10` |
 | Functions, bindings, types, exports, captures, violations | `scanr scan` |
-| Export census before a mass rename | `scanr scan` — **Refactor census** |
+| Export census before a mass rename | `scanr scan --mode inventory` then compact — **Refactor census** |
 | Similar functions or types | `scanr dupes` |
 | Slop, reinvention, test-theater, or diff-inflation evidence | `scanr slop`; add `--base <ref>` only for tracked diff evidence |
 
-Health metrics stay on `tree --health`. Slop detector evidence stays on `slop`.
+Start with `--mode inventory`. Then `scanr refs <name>` for usages. Use compact/verbose/`--file` only after you know which names matter. Health metrics stay on `tree --health`. Slop detector evidence stays on `slop`.
+
+## Name inventory
+
+Default agent scan of a folder:
+
+```bash
+scanr scan --mode inventory --root <path>
+scanr scan --mode inventory --root <path> --lines
+```
+
+JSON keys: `functions`, `constants`, `types`, `components`, `hooks`, `classes`, `enums`, `exports`. Rows are `{file,name}` (`kind` on constants and types). `--lines` adds `line`.
+
+Constant `kind` is `primitive` or `arrow`. `const Foo = () => {}` is `arrow` and also listed under `functions`. Types are `interface` or `type`. `components` / `hooks` are the React role subset of functions.
+
+The inventory is complete when `stats.parsed == stats.files` and `stats.errors == 0`. List every nonzero `skipped` or `errors` value.
+
+## Refs
+
+```bash
+scanr refs Card --root <path>
+```
+
+JSON: `{ver,name,matches:[{declaration,usages}]}`. Name-level oxc + import remapping, not tsserver find-all-references. Usages exclude the declaration line.
 
 ## Refactor census
 
-Build a complete, verifiable export inventory before a mass rename.
-
-1. `scanr scan --schema` when the compact field layout is unknown.
-2. `scanr scan` (default compact).
-3. The census is complete when `stats.parsed == stats.files` and `stats.errors == 0`. List every nonzero `skipped` or `errors` value, and the `err` messages.
-4. Build the From→To table from `f` (functions), `t` (types: `interface` / `type`), and `x` (every export). `f` and `t` carry `exported`. `b` has no exported flag — join to `x` by name for binding export status.
-5. `--mode files` lists names and drops export status; use compact or verbose for a rename inventory.
+1. `scanr scan --mode inventory` for names.
+2. `scanr scan --schema` when the compact field layout is unknown.
+3. `scanr scan` (compact) for lines, export flags, captures.
+4. The census is complete when `stats.parsed == stats.files` and `stats.errors == 0`. List every nonzero `skipped` or `errors` value, and the `err` messages.
+5. Build the From→To table from inventory names, then compact `f` / `t` / `x` when you need `exported` or positions. Compact `b` has no exported flag — join to `x` by name.
 
 ## Commands
 
@@ -55,6 +78,9 @@ scanr tree --functions
 scanr tree --functions --function-details --function-min-lines 3 --function-max-lines 10
 scanr tree --health --only-findings --top 20
 
+scanr scan --mode inventory
+scanr scan --mode inventory --lines
+scanr refs Card
 scanr scan
 scanr scan --schema
 scanr scan --mode verbose

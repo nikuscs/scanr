@@ -60,7 +60,7 @@ pub fn run(args: &ScanArgs) -> Result<()> {
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
 
-    output::write_result(&result, args.mode, &mut handle)?;
+    output::write_result_with_lines(&result, args.mode, args.lines, &mut handle)?;
     handle.write_all(b"\n")?;
 
     Ok(())

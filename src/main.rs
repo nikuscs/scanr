@@ -15,6 +15,7 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Dupes(args) => commands::dupes::run(&args),
         Commands::Slop(args) => commands::slop::run(&args),
+        Commands::Refs(args) => commands::refs::run(&args),
         Commands::Search(args) => commands::search::run(&args),
         Commands::Tree {
             root,

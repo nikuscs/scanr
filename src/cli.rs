@@ -19,6 +19,9 @@ pub enum Commands {
     /// Report deterministic, evidence-backed code-slop review signals
     Slop(SlopArgs),
 
+    /// Find declarations and usage sites for a name
+    Refs(RefsArgs),
+
     /// Search file contents or paths
     Search(SearchArgs),
 
@@ -164,6 +167,16 @@ pub struct SlopArgs {
 }
 
 #[derive(clap::Args, Clone)]
+pub struct RefsArgs {
+    /// Declaration or export name to look up
+    pub name: String,
+
+    /// Project root directory
+    #[arg(long, default_value = ".")]
+    pub root: String,
+}
+
+#[derive(clap::Args, Clone)]
 pub struct SearchArgs {
     /// Literal content pattern (omit when using --path)
     #[arg(required_unless_present = "path")]
@@ -199,6 +212,7 @@ pub struct SearchArgs {
 }
 
 #[derive(clap::Args, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ScanArgs {
     /// Project root directory
     #[arg(long, default_value = ".")]
@@ -255,11 +269,35 @@ pub struct ScanArgs {
     /// Print the selected mode's output field layout and exit
     #[arg(long)]
     pub schema: bool,
+
+    /// Include source line numbers in --mode inventory
+    #[arg(long)]
+    pub lines: bool,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_refs_name_and_root() {
+        let cli = Cli::try_parse_from(["scanr", "refs", "Card", "--root", "src"]).unwrap();
+        let Commands::Refs(args) = cli.command else {
+            panic!("expected refs command");
+        };
+        assert_eq!(args.name, "Card");
+        assert_eq!(args.root, "src");
+    }
+
+    #[test]
+    fn parses_scan_inventory_mode_and_lines() {
+        let cli = Cli::try_parse_from(["scanr", "scan", "--mode", "inventory", "--lines"]).unwrap();
+        let Commands::Scan(args) = cli.command else {
+            panic!("expected scan command");
+        };
+        assert_eq!(args.mode, crate::scan::types::OutputMode::Inventory);
+        assert!(args.lines);
+    }
 
     #[test]
     fn parses_scan_schema_flag() {

@@ -276,6 +276,8 @@ pub enum OutputMode {
     Files,
     /// Group by folder: { folders: { "dir": { functions, names } } }
     Folders,
+    /// Name lists: functions, constants, types, components, hooks, classes, enums, exports
+    Inventory,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]

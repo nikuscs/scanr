@@ -8,6 +8,7 @@ A fast, deterministic static-analysis and search CLI for TypeScript and JavaScri
 ## Features
 
 - **Structural analysis** — extract functions, captures, bindings, references, exports, and rule violations with oxc
+- **Name inventory and refs** — folder-level name lists, then declaration usage sites
 - **Content and path search** — gitignore-aware, parallel grep with stable JSON output
 - **Similarity detection** — APTED-based function and type comparison, including type literals
 - **Slop review signals** — evidence-backed exact, contextual, test-theater, and opt-in diff findings
@@ -32,7 +33,8 @@ cargo build --release
 
 ```bash
 scanr search "useState" --root . --json
-scanr scan --root . --mode files
+scanr scan --root . --mode inventory
+scanr refs Card --root .
 scanr dupes --root . --types
 scanr slop --root .
 scanr tree --root .
@@ -71,9 +73,11 @@ Search flags:
 
 ### `scanr scan`
 
-Extract TypeScript and JavaScript structure:
+Extract TypeScript and JavaScript structure. For agents, start with a name inventory, then use compact/verbose when you need lines, captures, or rules:
 
 ```bash
+scanr scan --mode inventory
+scanr scan --mode inventory --lines
 scanr scan
 scanr scan --root apps/web --mode verbose
 scanr scan --file src/index.ts
@@ -82,10 +86,13 @@ scanr scan --mode folders
 scanr scan --rules hoistable_nested_function
 ```
 
+`--mode inventory` emits `{functions,constants,types,components,hooks,classes,enums,exports}` as `{file,name}` rows (add `--lines` for `line`). Constant `kind` is `primitive` or `arrow` (`const Foo = () => {}` is `arrow` and also appears under `functions`). Types are `interface` or `type`. `components` / `hooks` are the React role subset of functions (`.tsx` + JSX + Uppercase for components; `useX` for hooks).
+
 Flags:
 
 - `--root <path>` — project root
-- `--mode compact|verbose|files|folders` — output shape
+- `--mode compact|verbose|files|folders|inventory` — output shape
+- `--lines` — include source line numbers in `--mode inventory`
 - `--include ts,tsx,js,jsx,...` — included extensions
 - `--exclude <patterns>` — excluded paths
 - `--max-bytes <bytes>` — maximum file size
@@ -101,6 +108,17 @@ Flags:
 Built-in rules are `no_unused_bindings`, `one_exported_function_per_file`, `max_functions_per_file`, `hoistable_nested_function`, `low_value_function`, `low_value_local_helper`, `dominant_container_tiny_helpers`, and `satellite_cluster`. `satellite_cluster` emits one grouped scan violation when a file has at least two non-exported file-scope helpers of at most eight lines with one or two same-file references; non-trivial helpers must be single-use. The low-value rules are deliberately narrow: trivial bodies are empty, constant/identity/direct-property returns, or direct pass-through calls. `low_value_local_helper` further requires a non-exported top-level ordinary helper with one or two same-file references and excludes React components, hooks, component-local functions, class methods, dead code, nested functions, exports, transformed calls, computed maps, and three-or-more-use functions. `dominant_container_tiny_helpers` emits one grouped review finding when a file has a configured large function/class plus enough non-exported 1–2-use ordinary helpers at or below the tiny-helper line limit. `--loose-low-value` broadens both rules to ordinary small bodies and component-local TSX functions, but still excludes React components, hooks, class methods, exports, tests by default, dead code, and functions with more than two references.
 
 Verbose function output includes `role` (`reactComponent`, `reactHook`, `componentLocal`, `classMethod`, or `helper`), based on JSX, naming, ownership, and function kind, plus each function's dotted parent, sorted captures, and optional `lowValueReason`. Compact function tuples are `[file,line,col,name,exported,kind,parent,captures,lowValueReason]`; violations are `[file,rule,count,details]`.
+
+### `scanr refs`
+
+Find declarations and analyzed-project usage sites for a name (oxc symbols plus import remapping, not tsserver-grade find-all-references):
+
+```bash
+scanr refs Card
+scanr refs MAX --root apps/web
+```
+
+JSON is `{ver,name,matches:[{declaration:{file,line,kind,exported},usages:[{file,line}]}]}`. Usages exclude the declaration line. This is name-level backtrace, not a language server.
 
 ### `scanr dupes`
 
@@ -218,13 +236,15 @@ Medium/high thresholds are respectively: file lines `300/500`, total functions `
 
 ## Agent workflow
 
-1. `scanr slop --root .` — review exact, contextual, and test-theater signals one finding per row.
-2. `scanr slop --root . --base HEAD~1` — add the three tracked-working-tree diff signals.
-3. `scanr tree --health --only-findings --top 20` — rank metric-backed hotspots.
-4. `scanr tree --functions --function-details --path <hotspot>` — inspect ownership and similarity in context.
-5. `scanr scan --mode verbose --rules hoistable_nested_function,low_value_function` — inspect captures and rule evidence.
-6. `scanr dupes --types` — inspect similar function/type pairs.
-7. `scanr search <name> --json` — locate uses before refactoring.
+1. `scanr scan --mode inventory --root .` — name lists first (functions, constants, types, components, hooks, classes, enums, exports).
+2. `scanr refs <name> --root .` — declarations and usage sites for a name.
+3. `scanr slop --root .` — review exact, contextual, and test-theater signals one finding per row.
+4. `scanr slop --root . --base HEAD~1` — add the three tracked-working-tree diff signals.
+5. `scanr tree --health --only-findings --top 20` — rank metric-backed hotspots.
+6. `scanr tree --functions --function-details --path <hotspot>` — inspect ownership and similarity in context.
+7. `scanr scan --mode verbose --rules hoistable_nested_function,low_value_function` — inspect captures and rule evidence.
+8. `scanr dupes --types` — inspect similar function/type pairs.
+9. `scanr search <name> --json` — literal hunt when refs is too narrow.
 
 ## Development
 

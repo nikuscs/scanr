@@ -2,11 +2,12 @@ use std::io::Write;
 
 use serde::Serialize;
 
-use super::types::{FunctionInfo, OutputMode, ScanResult, Stats};
+use super::types::{BindingKind, FunctionInfo, FunctionKind, OutputMode, ScanResult, Stats};
 
-pub fn write_result<W: Write>(
+pub fn write_result_with_lines<W: Write>(
     result: &ScanResult,
     mode: OutputMode,
+    include_lines: bool,
     w: &mut W,
 ) -> anyhow::Result<()> {
     match mode {
@@ -25,6 +26,10 @@ pub fn write_result<W: Write>(
         OutputMode::Folders => {
             let folders = FoldersOutput::from(result);
             serde_json::to_writer_pretty(w, &folders)?;
+        }
+        OutputMode::Inventory => {
+            let inventory = InventoryOutput::from_result(result, include_lines);
+            serde_json::to_writer(w, &inventory)?;
         }
     }
     Ok(())
@@ -73,6 +78,22 @@ pub fn write_schema<W: Write>(mode: OutputMode, w: &mut W) -> anyhow::Result<()>
             "fields": {
                 "folders": "{ dir: { functions, names } }"
             }
+        }),
+        OutputMode::Inventory => serde_json::json!({
+            "mode": "inventory",
+            "ver": 1,
+            "fields": {
+                "functions": ["file", "name", "line?"],
+                "constants": ["file", "name", "kind", "line?"],
+                "types": ["file", "name", "kind", "line?"],
+                "components": ["file", "name", "line?"],
+                "hooks": ["file", "name", "line?"],
+                "classes": ["file", "name", "line?"],
+                "enums": ["file", "name", "line?"],
+                "exports": ["file", "name"]
+            },
+            "constant_kinds": ["primitive", "arrow"],
+            "type_kinds": ["interface", "type"]
         }),
     };
     serde_json::to_writer(w, &schema)?;
@@ -398,6 +419,164 @@ impl From<&ScanResult> for FoldersOutput {
         }
         Self { ver: r.ver, stats: r.stats.clone(), folders: map }
     }
+}
+
+#[derive(Clone, Serialize)]
+struct InventoryName {
+    file: String,
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line: Option<u32>,
+}
+
+#[derive(Serialize)]
+struct InventoryOutput {
+    ver: u8,
+    stats: Stats,
+    functions: Vec<InventoryName>,
+    constants: Vec<InventoryName>,
+    types: Vec<InventoryName>,
+    components: Vec<InventoryName>,
+    hooks: Vec<InventoryName>,
+    classes: Vec<InventoryName>,
+    enums: Vec<InventoryName>,
+    exports: Vec<InventoryName>,
+}
+
+impl InventoryOutput {
+    fn from_result(r: &ScanResult, include_lines: bool) -> Self {
+        let mut functions = Vec::new();
+        let mut constants = Vec::new();
+        let mut types = Vec::new();
+        let mut components = Vec::new();
+        let mut hooks = Vec::new();
+        let mut classes = Vec::new();
+        let mut enums = Vec::new();
+        let mut exports = Vec::new();
+
+        for fi in &r.file_indices {
+            for func in &fi.functions {
+                let Some(name) = function_display_name(func) else {
+                    continue;
+                };
+                let item = inventory_item(&fi.path, name, None, func.line, include_lines);
+                match func.role(&fi.path) {
+                    crate::scan::types::FunctionRole::ReactComponent => {
+                        components.push(item.clone());
+                    }
+                    crate::scan::types::FunctionRole::ReactHook => hooks.push(item.clone()),
+                    _ => {}
+                }
+                functions.push(item);
+            }
+            for binding in &fi.bindings {
+                match binding.kind {
+                    BindingKind::Const => {
+                        let kind = if is_arrow_const(binding, &fi.functions) {
+                            "arrow"
+                        } else {
+                            "primitive"
+                        };
+                        constants.push(inventory_item(
+                            &fi.path,
+                            binding.name.clone(),
+                            Some(kind.to_string()),
+                            binding.line,
+                            include_lines,
+                        ));
+                    }
+                    BindingKind::Enum => {
+                        enums.push(inventory_item(
+                            &fi.path,
+                            binding.name.clone(),
+                            None,
+                            binding.line,
+                            include_lines,
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+            for type_info in &fi.types {
+                types.push(inventory_item(
+                    &fi.path,
+                    type_info.name.clone(),
+                    Some(type_info.kind.as_str().to_string()),
+                    type_info.line,
+                    include_lines,
+                ));
+            }
+            for class in &fi.classes {
+                classes.push(inventory_item(
+                    &fi.path,
+                    class.name.clone(),
+                    None,
+                    class.line,
+                    include_lines,
+                ));
+            }
+            for exp in &fi.exports {
+                exports.push(InventoryName {
+                    file: fi.path.clone(),
+                    name: exp.name.clone(),
+                    kind: None,
+                    line: None,
+                });
+            }
+        }
+
+        sort_inventory(&mut functions);
+        sort_inventory(&mut constants);
+        sort_inventory(&mut types);
+        sort_inventory(&mut components);
+        sort_inventory(&mut hooks);
+        sort_inventory(&mut classes);
+        sort_inventory(&mut enums);
+        sort_inventory(&mut exports);
+
+        Self {
+            ver: r.ver,
+            stats: r.stats.clone(),
+            functions,
+            constants,
+            types,
+            components,
+            hooks,
+            classes,
+            enums,
+            exports,
+        }
+    }
+}
+
+fn inventory_item(
+    file: &str,
+    name: String,
+    kind: Option<String>,
+    line: u32,
+    include_lines: bool,
+) -> InventoryName {
+    InventoryName { file: file.to_string(), name, kind, line: include_lines.then_some(line) }
+}
+
+fn function_display_name(function: &FunctionInfo) -> Option<String> {
+    function.name.as_ref().map(|name| {
+        function.parent.as_ref().map_or_else(|| name.clone(), |parent| format!("{parent}.{name}"))
+    })
+}
+
+fn is_arrow_const(binding: &crate::scan::types::BindingInfo, functions: &[FunctionInfo]) -> bool {
+    functions.iter().any(|function| {
+        matches!(function.kind, FunctionKind::Arrow | FunctionKind::Expression)
+            && (function.name.as_deref() == Some(binding.name.as_str())
+                || function.line == binding.line)
+    })
+}
+
+fn sort_inventory(items: &mut [InventoryName]) {
+    items.sort_by(|a, b| a.file.cmp(&b.file).then_with(|| a.name.cmp(&b.name)));
 }
 
 fn compute_dot_names(funcs: &[FunctionInfo]) -> Vec<String> {
