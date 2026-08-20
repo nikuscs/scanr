@@ -1,17 +1,8 @@
 ---
 name: ts-code-scan
-description: "scanr CLI for offline TS/JS analysis: slop review signals, name inventory for functions/constants/types, declaration usage backtrace, export census for renames/refactors, duplicate and similar-function detection, structural scan, content search, tree overview."
-argument-hint: [search pattern]
+description: "slop, inventory, refs, census, dupes, search, and tree for offline TypeScript and JavaScript"
 allowed-tools: Bash, Read
 ---
-
-## Quick action
-
-If `$ARGUMENTS` is provided, search immediately:
-
-```bash
-scanr search "$ARGUMENTS" --json
-```
 
 ## Command selection
 
@@ -26,7 +17,7 @@ Pick one command, then `scanr <cmd> --help` for flags. Presenting findings to a 
 | Usages of a declaration | `scanr refs <name>` |
 | Hoistable, capturing, low-value, or duplicate functions | `scanr tree --functions` |
 | Health hotspots (complexity, coupling, size, fan-out) | `scanr tree --health --only-findings --top 20` |
-| Nested component/function tree with explanations | `scanr tree --functions --function-details --function-min-lines 3 --function-max-lines 10` |
+| Nested component/function tree with explanations | `scanr tree --functions --function-details` |
 | Functions, bindings, types, exports, captures, violations | `scanr scan` |
 | Export census before a mass rename | `scanr scan --mode inventory` then compact — **Refactor census** |
 | Similar functions or types | `scanr dupes` |
@@ -34,18 +25,15 @@ Pick one command, then `scanr <cmd> --help` for flags. Presenting findings to a 
 
 Start with `--mode inventory`. Then `scanr refs <name>` for usages. Use compact/verbose/`--file` only after you know which names matter. Health metrics stay on `tree --health`. Slop detector evidence stays on `slop`.
 
-## Name inventory
+`--function-details` is the one tree when the user wants files, React components, nested functions, ownership, line counts, or cross-component similarities together. Return that tree as printed. Treat `--health` severity as threshold evidence and state the concrete metrics behind any recommendation.
 
-Default agent scan of a folder:
+## Name inventory
 
 ```bash
 scanr scan --mode inventory --root <path>
-scanr scan --mode inventory --root <path> --lines
 ```
 
-JSON keys: `functions`, `constants`, `types`, `components`, `hooks`, `classes`, `enums`, `exports`. Rows are `{file,name}` (`kind` on constants and types). `--lines` adds `line`.
-
-Constant `kind` is `primitive` or `arrow`. `const Foo = () => {}` is `arrow` and also listed under `functions`. Types are `interface` or `type`. `components` / `hooks` are the React role subset of functions.
+Add `--lines` for source lines. Constant `kind` is `primitive` or `arrow`. `components` / `hooks` are the React role subset of functions.
 
 The inventory is complete when `stats.parsed == stats.files` and `stats.errors == 0`. List every nonzero `skipped` or `errors` value.
 
@@ -55,7 +43,7 @@ The inventory is complete when `stats.parsed == stats.files` and `stats.errors =
 scanr refs Card --root <path>
 ```
 
-JSON: `{ver,name,matches:[{declaration,usages}]}`. Name-level oxc + import remapping, not tsserver find-all-references. Usages exclude the declaration line.
+Name-level oxc + import remapping, not tsserver find-all-references. Usages exclude the declaration line.
 
 ## Refactor census
 
@@ -64,41 +52,6 @@ JSON: `{ver,name,matches:[{declaration,usages}]}`. Name-level oxc + import remap
 3. `scanr scan` (compact) for lines, export flags, captures.
 4. The census is complete when `stats.parsed == stats.files` and `stats.errors == 0`. List every nonzero `skipped` or `errors` value, and the `err` messages.
 5. Build the From→To table from inventory names, then compact `f` / `t` / `x` when you need `exported` or positions. Compact `b` has no exported flag — join to `x` by name.
-
-## Commands
-
-```bash
-scanr search "useState" --json
-scanr search "todo" --ignore-case --glob '*.ts' --context 2
-scanr search --path "components" --json
-
-scanr tree
-scanr tree --path src/commands
-scanr tree --functions
-scanr tree --functions --function-details --function-min-lines 3 --function-max-lines 10
-scanr tree --health --only-findings --top 20
-
-scanr scan --mode inventory
-scanr scan --mode inventory --lines
-scanr refs Card
-scanr scan
-scanr scan --schema
-scanr scan --mode verbose
-scanr scan --file src/api.ts
-scanr scan --rules hoistable_nested_function,low_value_function,low_value_local_helper
-
-scanr dupes --root src
-scanr dupes --root src --types
-
-scanr slop --root .
-scanr slop --root . --base HEAD~1
-scanr slop --root . --confidence high --json
-scanr slop --root . --only scope-inflation,introduced-reinvention
-```
-
-`--function-details` is the one tree when the user wants files, React components, nested functions, ownership, line counts, or cross-component similarities together. Return that tree as printed.
-
-Treat `--health` severity as threshold evidence. State the concrete metrics behind any recommendation.
 
 ## Slop kinds
 
