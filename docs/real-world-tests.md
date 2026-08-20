@@ -32,7 +32,7 @@
 ### Comma calibration — 2026-08-11
 
 ```bash
-scanr scan --root /Users/jon/projects/comma/apps/web/src \
+scanr scan --root <project>/apps/web/src \
   --rules low_value_local_helper,dominant_container_tiny_helpers \
   --low-value-max-lines 3 \
   --dominant-container-min-lines 300 \
@@ -92,19 +92,19 @@ cmp /tmp/slop-1.json /tmp/slop-2.json
 Run only after the unit, temporary-Git, and deterministic-byte gates pass. Record reviewed examples and non-examples before adding counts, runtime, or precision claims:
 
 ```bash
-scanr slop --root /Users/jon/projects/comma/apps/web --confidence high --json
-scanr slop --root /Users/jon/projects/comma/apps/web \
+scanr slop --root <project>/apps/web --confidence high --json
+scanr slop --root <project>/apps/web \
   --only reinvented-helper,assertion-monoculture,mock-dominated-test,duplicated-test-body,implementation-mirroring-test \
   --top 20
-scanr slop --root /Users/jon/projects/comma --base HEAD~1 --json
+scanr slop --root <project> --base HEAD~1 --json
 ```
 
 Calibration recorded 2026-08-12 with the release binary:
 
-- Whole-project command: `scanr slop --root /Users/jon/projects/comma/apps/web --json`
+- Whole-project command: `scanr slop --root <project>/apps/web --json`
 - 54 findings in 1.07 seconds: 30 suppression chains, 16 swallowed failures, 4 parallel representations, 2 low-value local helpers, 1 dominant-container group, and 1 one-use abstraction.
 - Confidence split: 46 high and 8 medium. Human and JSON output were each byte-identical across two complete runs.
-- Diff command: `scanr slop --root /Users/jon/projects/comma --base HEAD~1 --json`; 55 changed files, 7,422 added lines, and 1 generated-surface-burst finding in 1.17 seconds.
+- Diff command: `scanr slop --root <project> --base HEAD~1 --json`; 55 changed files, 7,422 added lines, and 1 generated-surface-burst finding in 1.17 seconds.
 - Calibration removed false positives from unresolved hoisted packages, type-only and generated imports, public/Props DTOs, member-property guards, handled promise chains, test-only ordinary findings, and overlapping helper findings.
 
 - [x] Review at least five findings per detector family where available
