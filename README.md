@@ -264,13 +264,14 @@ Medium/high thresholds are respectively: file lines `300/500`, total functions `
 
 1. `scanr scan --mode inventory --root .` — name lists first (functions, constants, types, components, hooks, classes, enums, exports).
 2. `scanr refs <name> --root .` — declarations and usage sites for a name.
-3. `scanr slop --root .` — review exact, contextual, and test-theater signals one finding per row.
-4. `scanr slop --root . --base HEAD~1` — add the three tracked-working-tree diff signals.
-5. `scanr tree --health --only-findings --top 20` — rank metric-backed hotspots.
-6. `scanr tree --functions --function-details --path <hotspot>` — inspect ownership and similarity in context.
-7. `scanr scan --mode verbose --rules hoistable_nested_function,low_value_function` — inspect captures and rule evidence.
-8. `scanr dupes --types` — inspect similar function/type pairs.
-9. `scanr search <name> --json` — literal hunt when refs is too narrow.
+3. `scanr rename <Name|file#Name> <NewName> --root . --dry-run` — preview a type-accurate rename, then rerun without `--dry-run` and review `leftovers`.
+4. `scanr slop --root .` — review exact, contextual, and test-theater signals one finding per row.
+5. `scanr slop --root . --base HEAD~1` — add the three tracked-working-tree diff signals.
+6. `scanr tree --health --only-findings --top 20` — rank metric-backed hotspots.
+7. `scanr tree --functions --function-details --path <hotspot>` — inspect ownership and similarity in context.
+8. `scanr scan --mode verbose --rules hoistable_nested_function,low_value_function` — inspect captures and rule evidence.
+9. `scanr dupes --types` — inspect similar function/type pairs.
+10. `scanr search <name> --json` — literal hunt when refs is too narrow.
 
 ## Development
 
