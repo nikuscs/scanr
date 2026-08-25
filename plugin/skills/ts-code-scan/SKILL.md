@@ -1,6 +1,6 @@
 ---
 name: ts-code-scan
-description: "constants, types, functions, tree, slop, refs, census, dupes, and search for offline TypeScript and JavaScript"
+description: "constants, types, functions, tree, slop, refs, rename, census, dupes, and search for offline TypeScript and JavaScript"
 allowed-tools: Bash, Read
 ---
 
@@ -50,6 +50,17 @@ scanr refs <name> --root <path>
 ```
 
 Name-level oxc + import remapping, not tsserver. Usages exclude the declaration line.
+
+## Rename a symbol
+
+```bash
+scanr rename <Name> <NewName> --root <path>
+scanr rename src/card.tsx#Name <NewName> --root <path>   # when the bare name is ambiguous
+```
+
+Type-accurate via the TypeScript language service: imports, exports, aliases (public names preserved), barrels, JSX, interface/enum members, dynamic imports. Requires `bun` or `node` on PATH and a `tsconfig.json` (`--tsconfig <path>` when not at the root). `--dry-run` prints planned `files` and writes nothing.
+
+JSON `leftovers` lists old-name occurrences the checker cannot rewrite — strings, comments, files outside the tsconfig. Review each; do not sed them blindly. After a write rename, run the project's typecheck (`tsc --noEmit`) to verify. Ambiguous bare names exit non-zero listing `file#Name` candidates — rerun with one.
 
 ## After names are known
 
