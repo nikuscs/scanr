@@ -11,3 +11,5 @@
 tarpaulin-report.*
 lcov.info
 cobertura.xml
+
+worker/node_modules/

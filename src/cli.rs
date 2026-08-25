@@ -22,6 +22,9 @@ pub enum Commands {
     /// Find declarations and usage sites for a name
     Refs(RefsArgs),
 
+    /// Rename a symbol and all its type-resolved usages (requires bun or node)
+    Rename(RenameArgs),
+
     /// Search file contents or paths
     Search(SearchArgs),
 
@@ -177,6 +180,27 @@ pub struct RefsArgs {
 }
 
 #[derive(clap::Args, Clone)]
+pub struct RenameArgs {
+    /// Symbol name, or file#Name to disambiguate
+    pub target: String,
+
+    /// New symbol name
+    pub new_name: String,
+
+    /// Project root directory
+    #[arg(long, default_value = ".")]
+    pub root: String,
+
+    /// Path to tsconfig.json (default: <root>/tsconfig.json)
+    #[arg(long)]
+    pub tsconfig: Option<String>,
+
+    /// Report planned changes without writing files
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(clap::Args, Clone)]
 pub struct SearchArgs {
     /// Literal content pattern (omit when using --path)
     #[arg(required_unless_present = "path")]
@@ -287,6 +311,41 @@ mod tests {
         };
         assert_eq!(args.name, "Card");
         assert_eq!(args.root, "src");
+    }
+
+    #[test]
+    fn parses_rename_target_new_name_and_dry_run() {
+        let cli = Cli::try_parse_from([
+            "scanr",
+            "rename",
+            "src/card.tsx#Card",
+            "ProfileCard",
+            "--dry-run",
+        ])
+        .unwrap();
+        let Commands::Rename(args) = cli.command else {
+            panic!("expected rename command");
+        };
+        assert_eq!(args.target, "src/card.tsx#Card");
+        assert_eq!(args.new_name, "ProfileCard");
+        assert!(args.dry_run);
+    }
+
+    #[test]
+    fn parses_rename_tsconfig_flag() {
+        let cli = Cli::try_parse_from([
+            "scanr",
+            "rename",
+            "Card",
+            "ProfileCard",
+            "--tsconfig",
+            "custom/tsconfig.json",
+        ])
+        .unwrap();
+        let Commands::Rename(args) = cli.command else {
+            panic!("expected rename command");
+        };
+        assert_eq!(args.tsconfig.as_deref(), Some("custom/tsconfig.json"));
     }
 
     #[test]

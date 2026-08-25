@@ -1,4 +1,4 @@
-.PHONY: fmt lint check test build coverage coverage-ci coverage-all
+.PHONY: fmt lint check test build coverage coverage-ci coverage-all worker
 
 fmt:
 	cargo fmt --all
@@ -14,6 +14,9 @@ test:
 
 build:
 	cargo build --release
+
+worker:
+	cd worker && bun install && bun run build
 
 coverage:
 	cargo tarpaulin --out Html

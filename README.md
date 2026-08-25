@@ -9,6 +9,7 @@ A fast, deterministic static-analysis and search CLI for TypeScript and JavaScri
 
 - **Structural analysis** — extract functions, captures, bindings, references, exports, and rule violations with oxc
 - **Name inventory and refs** — folder-level name lists, then declaration usage sites
+- **Type-accurate rename** — rewrite a symbol and its TypeScript-resolved usages (requires bun or node)
 - **Content and path search** — gitignore-aware, parallel grep with stable JSON output
 - **Similarity detection** — APTED-based function and type comparison, including type literals
 - **Slop review signals** — evidence-backed exact, contextual, test-theater, and opt-in diff findings
@@ -41,6 +42,7 @@ cargo build --release
 scanr search "useState" --root . --json
 scanr scan --root . --mode inventory
 scanr refs Card --root .
+scanr rename Card ProfileCard --root .
 scanr dupes --root . --types
 scanr slop --root .
 scanr tree --root .
@@ -125,6 +127,24 @@ scanr refs MAX --root apps/web
 ```
 
 JSON is `{ver,name,matches:[{declaration:{file,line,kind,exported},usages:[{file,line}]}]}`. Usages exclude the declaration line. This is name-level backtrace, not a language server.
+
+### `scanr rename`
+
+Rename a symbol and every type-resolved usage via the TypeScript language service (ts-morph). Requires `bun` or `node` on PATH, and a `tsconfig.json` (pass `--tsconfig` when it is not `<root>/tsconfig.json`).
+
+```bash
+scanr rename Card ProfileCard
+scanr rename src/card.tsx#Card ProfileCard
+scanr rename Card ProfileCard --dry-run
+```
+
+JSON is `{ver,renamed:{name,new_name,file,line},dry_run,files,leftovers:[{file,line,text}]}`. `files` lists rewritten paths; `leftovers` are remaining string/comment/non-renamed occurrences of the old name. `--dry-run` prints the same `files` list and writes nothing. An ambiguous bare name exits non-zero and lists every candidate as `path/to/file.tsx#Name`.
+
+Flags:
+
+- `--root <path>` — project root (default `.`)
+- `--tsconfig <path>` — path to tsconfig.json (default `<root>/tsconfig.json`)
+- `--dry-run` — report planned changes without writing files
 
 ### `scanr dupes`
 
