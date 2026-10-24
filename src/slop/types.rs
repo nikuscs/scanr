@@ -45,10 +45,13 @@ pub enum SlopKind {
     GeneratedSurfaceBurst,
     PassThroughModule,
     OversplitModule,
+    UnusedFactoryMember,
+    TestOnlyFactoryMember,
+    ExposureOnlyMember,
 }
 
 impl SlopKind {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: [Self; 28] = [
         Self::SuppressionChain,
         Self::SwallowedFailure,
         Self::UnresolvedApi,
@@ -74,6 +77,9 @@ impl SlopKind {
         Self::GeneratedSurfaceBurst,
         Self::PassThroughModule,
         Self::OversplitModule,
+        Self::UnusedFactoryMember,
+        Self::TestOnlyFactoryMember,
+        Self::ExposureOnlyMember,
     ];
 
     pub const fn cli_name(self) -> &'static str {
@@ -103,6 +109,9 @@ impl SlopKind {
             Self::GeneratedSurfaceBurst => "generated-surface-burst",
             Self::PassThroughModule => "pass-through-module",
             Self::OversplitModule => "oversplit-module",
+            Self::UnusedFactoryMember => "unused-factory-member",
+            Self::TestOnlyFactoryMember => "test-only-factory-member",
+            Self::ExposureOnlyMember => "exposure-only-member",
         }
     }
 
@@ -133,6 +142,9 @@ impl SlopKind {
             Self::GeneratedSurfaceBurst => "Generated surface burst",
             Self::PassThroughModule => "Pass-through module",
             Self::OversplitModule => "Oversplit module",
+            Self::UnusedFactoryMember => "Unused factory member",
+            Self::TestOnlyFactoryMember => "Test-only factory member",
+            Self::ExposureOnlyMember => "Exposure-only member",
         }
     }
 
@@ -163,6 +175,9 @@ impl SlopKind {
             Self::GeneratedSurfaceBurst => 22,
             Self::PassThroughModule => 23,
             Self::OversplitModule => 24,
+            Self::UnusedFactoryMember => 25,
+            Self::TestOnlyFactoryMember => 26,
+            Self::ExposureOnlyMember => 27,
         }
     }
 
@@ -173,10 +188,18 @@ impl SlopKind {
         )
     }
 
+    /// Kinds that only `--type-aware` can prove; no syntactic detector emits them.
+    pub const fn is_type_aware_only(self) -> bool {
+        matches!(self, Self::TestOnlyFactoryMember | Self::ExposureOnlyMember)
+    }
+
     pub fn from_cli_name(name: &str) -> Option<Self> {
         match name {
             "passThroughModule" => Some(Self::PassThroughModule),
             "oversplitModule" => Some(Self::OversplitModule),
+            "unusedFactoryMember" => Some(Self::UnusedFactoryMember),
+            "testOnlyFactoryMember" => Some(Self::TestOnlyFactoryMember),
+            "exposureOnlyMember" => Some(Self::ExposureOnlyMember),
             _ => Self::ALL.into_iter().find(|kind| kind.cli_name() == name),
         }
     }
@@ -884,6 +907,20 @@ pub struct FileFacts {
     pub model_field_types: Vec<ModelFieldTypeFact>,
     pub runtime_lines: BTreeSet<u32>,
     pub export_surface: ExportSurface,
+    pub factory_members: Vec<FactoryMemberFact>,
+    pub property_accesses: BTreeMap<String, Vec<u32>>,
+    pub handed_off_calls: BTreeSet<String>,
+}
+
+/// A member of the object literal returned by an exported factory; nested literals
+/// produce dotted paths such as `actions.profile.remember`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FactoryMemberFact {
+    pub factory: String,
+    pub path: String,
+    pub name: String,
+    pub span: SourceSpan,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -967,6 +1004,7 @@ pub struct SlopOptions {
     pub include_test_files: bool,
     pub oversplit_max_lines: u32,
     pub oversplit_allow_importer: ignore::gitignore::Gitignore,
+    pub member_factories: Vec<String>,
 }
 
 impl Default for SlopOptions {
@@ -975,6 +1013,7 @@ impl Default for SlopOptions {
             include_test_files: false,
             oversplit_max_lines: 30,
             oversplit_allow_importer: ignore::gitignore::Gitignore::empty(),
+            member_factories: vec!["make*".to_string()],
         }
     }
 }

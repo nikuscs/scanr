@@ -7,6 +7,7 @@ mod rename;
 mod scan;
 mod similarity;
 mod slop;
+mod worker;
 
 use cli::{Cli, Commands};
 

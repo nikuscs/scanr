@@ -16,7 +16,7 @@ fn public_registry_covers_every_non_diff_kind_once_in_schema_order() {
     let kinds = registry.iter().map(|detector| detector.kind()).collect::<Vec<_>>();
     let expected = crate::slop::types::SlopKind::ALL
         .into_iter()
-        .filter(|kind| !kind.is_diff_only())
+        .filter(|kind| !kind.is_diff_only() && !kind.is_type_aware_only())
         .collect::<Vec<_>>();
     assert_eq!(kinds, expected);
     let unique = kinds.iter().copied().collect::<std::collections::BTreeSet<_>>();

@@ -1,14 +1,18 @@
 pub mod contextual_detectors;
 pub mod diff;
 pub mod exact_detectors;
+mod factory_members;
 pub mod facts;
 pub mod low_value_detectors;
+pub mod member_detectors;
 mod module_detectors;
 mod module_shapes;
 pub mod output;
 pub mod test_detectors;
 pub mod types;
 
+#[cfg(test)]
+mod member_tests;
 #[cfg(test)]
 mod module_tests;
 #[cfg(test)]
@@ -107,6 +111,7 @@ pub fn detectors(options: &SlopOptions) -> Vec<Box<dyn types::Detector>> {
     registry.extend(contextual);
     registry.extend(test_detectors::detectors());
     registry.extend(module_detectors::detectors(options));
+    registry.extend(member_detectors::detectors(options));
     registry
 }
 

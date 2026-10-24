@@ -220,7 +220,7 @@ fn path_matches(path: &str, pattern: &str, ignore_case: bool) -> bool {
     }
 }
 
-fn wildcard_match(value: &[u8], pattern: &[u8]) -> bool {
+pub fn wildcard_match(value: &[u8], pattern: &[u8]) -> bool {
     let (mut value_index, mut pattern_index) = (0, 0);
     let (mut star, mut retry_value) = (None, 0);
 

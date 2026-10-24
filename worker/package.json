@@ -1,7 +1,7 @@
 {
-  "name": "scanr-rename-worker",
+  "name": "scanr-worker",
   "private": true,
   "type": "module",
   "dependencies": { "ts-morph": "28.0.0" },
-  "scripts": { "build": "bun build ./rename-worker.ts --target=node --outfile=../assets/rename-worker.mjs" }
+  "scripts": { "build": "bun build ./index.ts --target=node --outfile=../assets/worker.mjs" }
 }

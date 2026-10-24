@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use crate::cli::SlopArgs;
 use crate::scan::rules::is_test_path;
 use crate::slop::diff::{detect_diff_findings, load_diff_scope};
+use crate::slop::member_detectors::detect_type_aware;
 use crate::slop::output::{SlopFilter, SlopOutputFormat, filter_and_sort_findings, write_report};
 use crate::slop::types::{SlopKind, SlopOptions, SlopReport};
 use crate::slop::{build_project_facts, collect_project_files, detectors};
@@ -28,6 +29,7 @@ pub fn analyze(args: &SlopArgs) -> Result<SlopReport> {
         include_test_files: args.include_test_files,
         oversplit_max_lines: args.oversplit_max_lines,
         oversplit_allow_importer: allowed.build()?,
+        member_factories: args.member_factory.clone(),
     };
     let root = fs::canonicalize(&args.root).context("Cannot resolve project root")?;
     let diff = args.base.as_deref().map(|base| load_diff_scope(&root, base)).transpose()?;
@@ -39,6 +41,10 @@ pub fn analyze(args: &SlopArgs) -> Result<SlopReport> {
         .collect::<Vec<_>>();
     if let Some(scope) = &diff {
         findings.extend(detect_diff_findings(&facts, scope));
+    }
+    if args.type_aware {
+        findings.retain(|finding| finding.kind != SlopKind::UnusedFactoryMember);
+        findings.extend(detect_type_aware(&root, &args.tsconfig, &args.member_factory)?);
     }
     findings.retain(|finding| {
         args.include_test_files
@@ -110,6 +116,9 @@ mod tests {
             include_test_files: false,
             oversplit_max_lines: 30,
             oversplit_allow_importer: Vec::new(),
+            member_factory: vec!["make*".to_string()],
+            type_aware: false,
+            tsconfig: Vec::new(),
             json: true,
         }
     }
@@ -128,6 +137,25 @@ mod tests {
         input.oversplit_allow_importer = vec!["{a,b".to_string()];
         assert!(
             analyze(&input).unwrap_err().to_string().contains("Invalid oversplit importer glob")
+        );
+    }
+
+    #[test]
+    fn member_kinds_accept_camel_case_and_canonical_names() {
+        let mut input = args();
+        input.only = vec![
+            "unusedFactoryMember".to_string(),
+            "testOnlyFactoryMember".to_string(),
+            "exposure-only-member".to_string(),
+        ];
+        let filter = validate_filter_args(&input).unwrap();
+        assert_eq!(
+            filter.only,
+            BTreeSet::from([
+                SlopKind::UnusedFactoryMember,
+                SlopKind::TestOnlyFactoryMember,
+                SlopKind::ExposureOnlyMember
+            ])
         );
     }
 

@@ -119,6 +119,13 @@ pub fn collect_facts(
     collector.finish_declarations(semantic);
     collector.collect_semantic_references(semantic);
     collector.sort_all();
+    let factory_members =
+        super::factory_members::collect_members(program, exported_names, |span| {
+            collector.span(span)
+        });
+    collector.facts.factory_members = factory_members;
+    (collector.facts.property_accesses, collector.facts.handed_off_calls) =
+        super::factory_members::collect_accesses(program);
     collector.facts
 }
 

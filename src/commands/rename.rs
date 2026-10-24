@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::cli::RenameArgs;
 use crate::rename::{
     Leftover, WorkerRequest, WorkerResponse, find_identifier_line, parse_target,
-    resolve_declaration, run_worker, scan_leftovers,
+    resolve_declaration, scan_leftovers,
 };
 use crate::slop::{build_project_facts, collect_project_files};
 
@@ -51,14 +51,17 @@ pub fn run(args: &RenameArgs) -> Result<()> {
         },
     };
     let source_file = root.join(&file);
-    let response: WorkerResponse = run_worker(&WorkerRequest {
-        tsconfig: tsconfig.to_string_lossy().into_owned(),
-        file: source_file.to_string_lossy().into_owned(),
-        line,
-        name: target.name.clone(),
-        new_name: args.new_name.clone(),
-        dry_run: args.dry_run,
-    })?;
+    let response: WorkerResponse = crate::worker::run_worker(
+        "rename",
+        &WorkerRequest {
+            tsconfig: tsconfig.to_string_lossy().into_owned(),
+            file: source_file.to_string_lossy().into_owned(),
+            line,
+            name: target.name.clone(),
+            new_name: args.new_name.clone(),
+            dry_run: args.dry_run,
+        },
+    )?;
     let leftovers = if args.dry_run { Vec::new() } else { scan_leftovers(&root, &target.name) };
     let mut files: Vec<String> =
         response.files.iter().map(|path| root_relative(&root, path)).collect();

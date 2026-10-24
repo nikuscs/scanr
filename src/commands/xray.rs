@@ -185,6 +185,9 @@ fn build_slop(root: &Path, top: usize) -> Result<SlopSummary> {
         include_test_files: false,
         oversplit_max_lines: 30,
         oversplit_allow_importer: Vec::new(),
+        member_factory: vec!["make*".to_string()],
+        type_aware: false,
+        tsconfig: Vec::new(),
         json: true,
     })?;
 

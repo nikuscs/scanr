@@ -1,7 +1,3 @@
-mod worker;
-
-pub use worker::{WorkerRequest, WorkerResponse, run_worker};
-
 use std::fs;
 use std::path::Path;
 
@@ -10,6 +6,26 @@ use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
 
 use crate::slop::types::ProjectFacts;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerRequest {
+    pub tsconfig: String,
+    pub file: String,
+    pub line: u32,
+    pub name: String,
+    pub new_name: String,
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerResponse {
+    #[serde(default)]
+    pub dry_run: bool,
+    #[serde(default)]
+    pub files: Vec<String>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenameTarget {

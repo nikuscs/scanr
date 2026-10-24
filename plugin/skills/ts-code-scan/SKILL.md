@@ -84,8 +84,10 @@ Compact or verbose `scanr scan` for lines, captures, export flags, violations. `
 
 ## Slop kinds
 
-`suppression-chain`, `swallowed-failure`, `unresolved-api`, `async-misuse`, `dead-surface`, `non-executing-test`, `reinvented-helper`, `low-value-local-helper`, `dominant-container-tiny-helpers`, `redundant-defense`, `one-use-abstraction`, `patch-stack`, `speculative-model`, `comment-inversion`, `parallel-representation`, `generic-name-cluster`, `assertion-monoculture`, `mock-dominated-test`, `duplicated-test-body`, `implementation-mirroring-test`, `scope-inflation`, `introduced-reinvention`, `generated-surface-burst`.
+`suppression-chain`, `swallowed-failure`, `unresolved-api`, `async-misuse`, `dead-surface`, `non-executing-test`, `reinvented-helper`, `low-value-local-helper`, `dominant-container-tiny-helpers`, `redundant-defense`, `one-use-abstraction`, `patch-stack`, `speculative-model`, `comment-inversion`, `parallel-representation`, `generic-name-cluster`, `assertion-monoculture`, `mock-dominated-test`, `duplicated-test-body`, `implementation-mirroring-test`, `scope-inflation`, `introduced-reinvention`, `generated-surface-burst`, `pass-through-module`, `oversplit-module`, `unused-factory-member`, `test-only-factory-member`, `exposure-only-member`.
 
-The first six are High. The rest are Medium. The last three are diff-only and need `--base`.
+The first six are High. The rest are Medium. `scope-inflation`, `introduced-reinvention` and `generated-surface-burst` are diff-only and need `--base`. `test-only-factory-member` and `exposure-only-member` need `--type-aware`.
+
+Dead members of factory-returned services (`makeRedisService` returning an unused `decrement`): `scanr slop --root <path> --type-aware --member-factory 'make*Service' --only unusedFactoryMember,testOnlyFactoryMember,exposureOnlyMember`. Add `--tsconfig <path>` once per app in a monorepo. Needs bun or node.
 
 `--confidence` is a minimum. `--exclude` wins over `--only`. Dead-surface wording: no analyzed-project references were resolved.

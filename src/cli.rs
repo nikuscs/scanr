@@ -175,6 +175,18 @@ pub struct SlopArgs {
     #[arg(long)]
     pub oversplit_allow_importer: Vec<String>,
 
+    /// Factory names whose returned members are checked, `*` and `?` wildcards (repeatable)
+    #[arg(long, default_value = "make*")]
+    pub member_factory: Vec<String>,
+
+    /// Resolve factory members with the TypeScript checker (requires bun or node)
+    #[arg(long)]
+    pub type_aware: bool,
+
+    /// tsconfig.json for --type-aware (repeatable; default: every tsconfig.json under the root)
+    #[arg(long, requires = "type_aware")]
+    pub tsconfig: Vec<String>,
+
     /// Emit stable schema-versioned JSON
     #[arg(long)]
     pub json: bool,
@@ -415,6 +427,13 @@ mod tests {
             "*.service.ts",
             "--oversplit-allow-importer",
             "src/adapters/*",
+            "--member-factory",
+            "make*Service",
+            "--type-aware",
+            "--tsconfig",
+            "apps/server/tsconfig.json",
+            "--tsconfig",
+            "apps/web/tsconfig.json",
             "--json",
         ])
         .unwrap();
@@ -428,7 +447,17 @@ mod tests {
         assert_eq!(args.top, Some(0));
         assert_eq!(args.oversplit_max_lines, 50);
         assert_eq!(args.oversplit_allow_importer, ["*.service.ts", "src/adapters/*"]);
+        assert_eq!(args.member_factory, ["make*Service"]);
+        assert!(args.type_aware);
+        assert_eq!(args.tsconfig, ["apps/server/tsconfig.json", "apps/web/tsconfig.json"]);
         assert!(args.include_test_files);
         assert!(args.json);
+
+        let defaults = Cli::try_parse_from(["scanr", "slop"]).unwrap();
+        let Commands::Slop(defaults) = defaults.command else {
+            panic!("expected slop command");
+        };
+        assert_eq!(defaults.member_factory, ["make*"]);
+        assert!(Cli::try_parse_from(["scanr", "slop", "--tsconfig", "tsconfig.json"]).is_err());
     }
 }
