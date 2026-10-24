@@ -48,6 +48,37 @@ pub fn collect_facts(
         facts: FileFacts {
             path: normalized_path.clone(),
             analysis_complete,
+            module_span: Some(SourceSpan {
+                path: normalized_path.clone(),
+                start_byte: 0,
+                end_byte: source.len() as u32,
+                start_line: 1,
+                start_column: 1,
+                end_line: source.lines().count().max(1) as u32,
+                end_column: source.lines().last().map_or(1, |line| line.len() as u32 + 1),
+            }),
+            module_shape: super::module_shapes::classify(program, semantic),
+            module_sources: semantic
+                .nodes()
+                .iter()
+                .filter_map(|node| match node.kind() {
+                    AstKind::ImportDeclaration(import)
+                        if import
+                            .specifiers
+                            .as_ref()
+                            .is_some_and(|specifiers| !specifiers.is_empty()) =>
+                    {
+                        Some(import.source.value.to_string())
+                    }
+                    AstKind::ExportAllDeclaration(export) => Some(export.source.value.to_string()),
+                    AstKind::ExportFromDeclaration(export) => Some(export.source.value.to_string()),
+                    AstKind::ImportExpression(import) => match &import.source {
+                        Expression::StringLiteral(source) => Some(source.value.to_string()),
+                        _ => None,
+                    },
+                    _ => None,
+                })
+                .collect(),
             is_test: is_test_path(&normalized_path),
             is_generated: is_generated_path(&normalized_path, source),
             export_surface: ExportSurface {
@@ -1521,10 +1552,11 @@ fn is_generated_path(path: &str, source: &str) -> bool {
         || lower.contains(".gen.")
         || lower.contains("/generated/")
         || lower.contains("/__generated__/")
-        || source.lines().take(5).any(|line| {
+        || source.lines().take(10).any(|line| {
             let line = line.to_ascii_lowercase();
             line.contains("@generated")
                 || line.contains("code generated")
+                || line.contains("automatically generated")
                 || line.contains("do not edit")
         })
 }

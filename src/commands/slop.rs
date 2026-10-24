@@ -20,11 +20,19 @@ pub fn run(args: &SlopArgs) -> Result<()> {
 
 fn analyze(args: &SlopArgs) -> Result<SlopReport> {
     let filter = validate_filter_args(args)?;
+    let mut allowed = ignore::gitignore::GitignoreBuilder::new("");
+    for pattern in &args.oversplit_allow_importer {
+        allowed.add_line(None, pattern).context("Invalid oversplit importer glob")?;
+    }
+    let options = SlopOptions {
+        include_test_files: args.include_test_files,
+        oversplit_max_lines: args.oversplit_max_lines,
+        oversplit_allow_importer: allowed.build()?,
+    };
     let root = fs::canonicalize(&args.root).context("Cannot resolve project root")?;
     let diff = args.base.as_deref().map(|base| load_diff_scope(&root, base)).transpose()?;
     let files = collect_project_files(&root)?;
     let facts = build_project_facts(&root, files)?;
-    let options = SlopOptions { include_test_files: args.include_test_files };
     let mut findings = detectors(&options)
         .into_iter()
         .flat_map(|detector| detector.detect(&facts))
@@ -63,7 +71,7 @@ fn validate_filter_args(args: &SlopArgs) -> Result<SlopFilter> {
         .only
         .iter()
         .chain(&args.exclude)
-        .filter(|name| !valid.contains(name.as_str()))
+        .filter(|name| SlopKind::from_cli_name(name).is_none())
         .cloned()
         .collect::<BTreeSet<_>>();
     if !unknown.is_empty() {
@@ -100,8 +108,27 @@ mod tests {
             exclude: Vec::new(),
             top: None,
             include_test_files: false,
+            oversplit_max_lines: 30,
+            oversplit_allow_importer: Vec::new(),
             json: true,
         }
+    }
+
+    #[test]
+    fn module_kinds_accept_camel_case_and_canonical_names() {
+        let mut input = args();
+        input.only = vec!["passThroughModule".to_string(), "oversplitModule".to_string()];
+        input.exclude = vec!["oversplit-module".to_string()];
+        let filter = validate_filter_args(&input).unwrap();
+        assert_eq!(
+            filter.only,
+            BTreeSet::from([SlopKind::PassThroughModule, SlopKind::OversplitModule])
+        );
+        assert_eq!(filter.exclude, BTreeSet::from([SlopKind::OversplitModule]));
+        input.oversplit_allow_importer = vec!["{a,b".to_string()];
+        assert!(
+            analyze(&input).unwrap_err().to_string().contains("Invalid oversplit importer glob")
+        );
     }
 
     #[test]

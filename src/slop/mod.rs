@@ -3,10 +3,14 @@ pub mod diff;
 pub mod exact_detectors;
 pub mod facts;
 pub mod low_value_detectors;
+mod module_detectors;
+mod module_shapes;
 pub mod output;
 pub mod test_detectors;
 pub mod types;
 
+#[cfg(test)]
+mod module_tests;
 #[cfg(test)]
 mod tests;
 
@@ -102,6 +106,7 @@ pub fn detectors(options: &SlopOptions) -> Vec<Box<dyn types::Detector>> {
     registry.extend(low_value_detectors::detectors(options));
     registry.extend(contextual);
     registry.extend(test_detectors::detectors());
+    registry.extend(module_detectors::detectors(options));
     registry
 }
 
@@ -280,39 +285,116 @@ struct AliasConfig {
     paths: BTreeMap<String, Vec<String>>,
 }
 
+/// Effective `baseUrl` and `paths` of one tsconfig after following relative `extends`.
+/// `paths` keeps the directory of the config that declared it, which TypeScript uses
+/// to resolve targets when no `baseUrl` is set.
+#[derive(Default)]
+struct TsconfigOptions {
+    base_url: Option<PathBuf>,
+    paths: Option<(PathBuf, BTreeMap<String, Vec<String>>)>,
+}
+
+const MAX_TSCONFIG_EXTENDS_DEPTH: usize = 8;
+
 fn load_tsconfig_aliases(root: &Path, coverage: &mut AnalysisCoverage) -> AliasConfig {
-    let path = root.join("tsconfig.json");
-    let Ok(source) = fs::read_to_string(&path) else {
-        return AliasConfig { base_url: root.to_path_buf(), ..AliasConfig::default() };
+    let options = read_tsconfig(&root.join("tsconfig.json"), coverage, 0);
+    match options.paths {
+        Some((paths_dir, paths)) => {
+            AliasConfig { base_url: options.base_url.unwrap_or(paths_dir), paths }
+        }
+        None => AliasConfig {
+            base_url: options.base_url.unwrap_or_else(|| root.to_path_buf()),
+            ..AliasConfig::default()
+        },
+    }
+}
+
+fn read_tsconfig(path: &Path, coverage: &mut AnalysisCoverage, depth: usize) -> TsconfigOptions {
+    let Ok(source) = fs::read_to_string(path) else {
+        return TsconfigOptions::default();
     };
     let Ok(json) = serde_json::from_str::<Value>(&source) else {
         coverage.unsupported_tsconfigs.insert(path.to_string_lossy().to_string());
-        return AliasConfig { base_url: root.to_path_buf(), ..AliasConfig::default() };
+        return TsconfigOptions::default();
     };
+    let directory = path.parent().unwrap_or(path);
+    let inherited = match json.get("extends").and_then(Value::as_str) {
+        Some(parent) if parent.starts_with('.') && depth < MAX_TSCONFIG_EXTENDS_DEPTH => {
+            let mut parent_path = directory.join(parent).into_os_string();
+            if !Path::new(parent)
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+            {
+                parent_path.push(".json");
+            }
+            read_tsconfig(Path::new(&parent_path), coverage, depth + 1)
+        }
+        _ => TsconfigOptions::default(),
+    };
+
     let compiler = json.get("compilerOptions").and_then(Value::as_object);
     let base_url = compiler
         .and_then(|value| value.get("baseUrl"))
         .and_then(Value::as_str)
-        .map_or_else(|| root.to_path_buf(), |value| root.join(value));
-    let mut paths = BTreeMap::new();
-    if let Some(entries) = compiler.and_then(|value| value.get("paths")).and_then(Value::as_object)
-    {
-        for (alias, targets) in entries {
-            if let Some(targets) = targets.as_array() {
-                paths.insert(
-                    alias.clone(),
-                    targets.iter().filter_map(Value::as_str).map(str::to_string).collect(),
-                );
-            }
-        }
-    }
-    AliasConfig { base_url, paths }
+        .map(|value| directory.join(value))
+        .or(inherited.base_url);
+    let paths = compiler
+        .and_then(|value| value.get("paths"))
+        .and_then(Value::as_object)
+        .map(|entries| {
+            let paths = entries
+                .iter()
+                .filter_map(|(alias, targets)| {
+                    let targets = targets.as_array()?;
+                    Some((
+                        alias.clone(),
+                        targets.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+                    ))
+                })
+                .collect();
+            (directory.to_path_buf(), paths)
+        })
+        .or(inherited.paths);
+    TsconfigOptions { base_url, paths }
 }
 
 fn resolve_imports(root: &Path, aliases: &AliasConfig, project: &mut ProjectFacts) {
     let file_paths = project.files.keys().cloned().collect::<BTreeSet<_>>();
+    let config_roots = file_paths
+        .iter()
+        .filter_map(|path| {
+            root.join(path)
+                .parent()?
+                .ancestors()
+                .take_while(|directory| directory.starts_with(root))
+                .find(|directory| directory.join("tsconfig.json").is_file())
+                .map(|directory| (path.clone(), directory.to_path_buf()))
+        })
+        .collect::<BTreeMap<_, _>>();
+    let configs = config_roots
+        .values()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .map(|directory| {
+            (directory.clone(), load_tsconfig_aliases(directory, &mut project.coverage))
+        })
+        .collect::<BTreeMap<_, _>>();
     let mut resolutions = BTreeMap::new();
     for (importer, facts) in &project.files {
+        let aliases = config_roots
+            .get(importer)
+            .and_then(|directory| configs.get(directory))
+            .unwrap_or(aliases);
+        if !facts.is_test && !facts.is_generated {
+            for source in &facts.module_sources {
+                if let Resolution::Resolved(path) =
+                    resolve_module(root, aliases, importer, source, &file_paths)
+                    && path != *importer
+                {
+                    project.module_importers.entry(path).or_default().insert(importer.clone());
+                }
+            }
+        }
         for import in &facts.imports {
             let key = ImportKey {
                 importer: importer.clone(),
@@ -699,7 +781,9 @@ fn remap_expression_symbols(
 }
 
 fn alias_capture<'a>(pattern: &str, source: &'a str) -> Option<&'a str> {
-    let (prefix, suffix) = pattern.split_once('*')?;
+    let Some((prefix, suffix)) = pattern.split_once('*') else {
+        return (pattern == source).then_some("");
+    };
     source.strip_prefix(prefix)?.strip_suffix(suffix)
 }
 
@@ -729,9 +813,13 @@ fn package_bases(root: &Path, source: &str) -> Vec<PathBuf> {
 
 fn module_candidates(base: &Path) -> Vec<PathBuf> {
     let mut candidates = vec![base.to_path_buf()];
-    if base.extension().is_none() {
+    if !base.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
+        matches!(extension, "ts" | "tsx" | "js" | "jsx" | "mts" | "cts" | "mjs" | "cjs")
+    }) {
         for extension in ["ts", "tsx", "js", "jsx", "mts", "cts", "mjs", "cjs", "d.ts"] {
-            candidates.push(base.with_extension(extension));
+            let mut candidate = base.as_os_str().to_os_string();
+            candidate.push(format!(".{extension}"));
+            candidates.push(PathBuf::from(candidate));
         }
         for name in ["index.ts", "index.tsx", "index.js", "index.jsx", "index.d.ts"] {
             candidates.push(base.join(name));

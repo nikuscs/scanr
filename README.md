@@ -170,6 +170,7 @@ scanr slop --root . --base HEAD~1
 scanr slop --root . --confidence high --json
 scanr slop --root . --only scope-inflation,introduced-reinvention
 scanr slop --root . --exclude generic-name-cluster --top 20
+scanr slop --root . --only passThroughModule,oversplitModule --oversplit-allow-importer '*.service.ts'
 ```
 
 Markdown is the default and always uses one finding per row with full source line ranges and plain-English evidence, explanations, and actions. `--json` emits compact schema version 1 with a canonical absolute `root`, relative finding/evidence paths, and an optional diff summary. Output and filtering order are deterministic. Tables produced directly by `scanr slop`, or by reformatting its JSON, contain only Scanr-generated facts and findings; any ranking, recommendation, or interpretation added outside those fields is human review commentary and should be labeled separately.
@@ -181,10 +182,12 @@ Flags:
 - `--root <path>` — analysis root (default `.`)
 - `--base <ref>` — opt into the three diff-only kinds; the ref is resolved to a commit before diffing
 - `--confidence high|medium` — minimum confidence (default `medium`)
-- `--only <kinds>` — retain only exact kebab-case names; comma-separated and repeatable
+- `--only <kinds>` — retain canonical kebab-case names; comma-separated and repeatable. The new module kinds also accept `passThroughModule` and `oversplitModule`.
 - `--exclude <kinds>` — remove names after `--only`; exclusion wins on overlap
 - `--top <n>` — truncate after deterministic sorting; `0` is valid
 - `--include-test-files` — include tests in ordinary contextual/low-value analysis; test-theater detectors still inspect their required test subjects
+- `--oversplit-max-lines <n>` — maximum physical file lines for `oversplit-module` (default `30`, inclusive; comments and blank lines count)
+- `--oversplit-allow-importer <glob>` — exempt oversplit findings whose single importer matches this gitignore-style path pattern; repeatable, e.g. `'*.service.ts'`
 - `--json` — emit JSON schema version 1 instead of Markdown
 
 `--only`, `--exclude`, `--confidence`, and `--top` apply after enabled analysis completes. Unknown kind names fail before filesystem scanning. With `--base`, Git compares the resolved commit with tracked staged and unstaged working-tree content. Untracked files are excluded. The three diff-only kinds activate only with `--base`; every non-diff detector continues to analyze the whole root.
@@ -200,6 +203,8 @@ Canonical kinds:
 | `dead-surface` | High | A literal condition plus placeholder evidence proves a branch cannot execute. |
 | `non-executing-test` | High | A recognized test registration is skipped, todo, or disabled. |
 | `reinvented-helper` | Medium | A local helper structurally repeats an established cross-file helper. |
+| `pass-through-module` | Medium | A module only re-exports imports or exposes functions/objects forwarding unchanged arguments, without local logic. JSON kind: `passThroughModule`. |
+| `oversplit-module` | Medium | A module of at most 30 physical lines has exactly one analyzed non-test importer, named in evidence. JSON kind: `oversplitModule`. |
 | `low-value-local-helper` | Medium | A balanced-rule top-level trivial helper has only one or two same-file references. |
 | `dominant-container-tiny-helpers` | Medium | A 300+ line function/class sits beside at least two tiny low-use helpers. |
 | `satellite-cluster` | Medium | One file contains at least two non-exported helpers of at most eight lines with one or two local references; non-trivial helpers must be single-use. |
@@ -217,6 +222,8 @@ Canonical kinds:
 | `scope-inflation` | Medium, diff-only | A small runtime edit accompanies broad new files/helpers or a new dependency. |
 | `introduced-reinvention` | Medium, diff-only | A fully added helper resembles a referenced helper outside the diff. |
 | `generated-surface-burst` | Medium, diff-only | A diff adds at least three exports with no resolved analyzed-project references or four literal-only duplicate tests. |
+
+Module findings always skip tests, declaration/generated files, incomplete parses, and known package entrypoints, even with `--include-test-files`. Oversplit counts distinct non-test, non-generated importing files, including type/namespace imports, re-exports, and literal dynamic imports, but not side-effect-only imports. Generated-file detection includes an `automatically generated` marker in the first ten lines. Repeat `--oversplit-allow-importer` to combine exemptions, for example `--oversplit-allow-importer '*.service.ts' --oversplit-allow-importer 'rpc.router.ts' --oversplit-allow-importer 'vite.config.ts'`. It is a review signal, not proof that a file should be merged: public APIs, domain boundaries, and framework conventions can justify a small file. Import counts use the existing offline module resolver; unresolved aliases, non-literal dynamic imports, and external consumers are not counted. Pass-through proof is conservative: transformed/default arguments, side effects, async wrappers, and unsupported syntax are not reported.
 
 Limitations: generated files and declaration files are excluded using path/header conventions; tests and package entrypoints receive detector-specific exclusions; dynamic imports, reflective/string-based use, unresolved re-exports, and incomplete parses limit absence claims; analyzed-project reference counts cannot prove that public exports have no external package, plugin, or generated consumers; option/config-property burst detection stays disabled without exact type-resolved ownership; structural similarity does not prove semantic interchangeability; diff scope excludes untracked files and cannot infer the user's requested scope. The tool remains offline and makes no AI-authorship, precision/recall, or universal quality claim.
 

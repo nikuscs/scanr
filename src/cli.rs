@@ -164,6 +164,14 @@ pub struct SlopArgs {
     #[arg(long)]
     pub include_test_files: bool,
 
+    /// Maximum physical file lines for oversplit-module findings
+    #[arg(long, default_value_t = 30)]
+    pub oversplit_max_lines: u32,
+
+    /// Exempt single importers matching a gitignore-style glob (repeatable)
+    #[arg(long)]
+    pub oversplit_allow_importer: Vec<String>,
+
     /// Emit stable schema-versioned JSON
     #[arg(long)]
     pub json: bool,
@@ -383,6 +391,12 @@ mod tests {
             "--top",
             "0",
             "--include-test-files",
+            "--oversplit-max-lines",
+            "50",
+            "--oversplit-allow-importer",
+            "*.service.ts",
+            "--oversplit-allow-importer",
+            "src/adapters/*",
             "--json",
         ])
         .unwrap();
@@ -394,6 +408,8 @@ mod tests {
         assert_eq!(args.only, ["suppression-chain", "patch-stack"]);
         assert_eq!(args.exclude, ["dead-surface"]);
         assert_eq!(args.top, Some(0));
+        assert_eq!(args.oversplit_max_lines, 50);
+        assert_eq!(args.oversplit_allow_importer, ["*.service.ts", "src/adapters/*"]);
         assert!(args.include_test_files);
         assert!(args.json);
     }

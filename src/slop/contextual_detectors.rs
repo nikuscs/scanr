@@ -1516,7 +1516,7 @@ export const value = 4;
         let default_detector = only(detectors(&options()), SlopKind::SpeculativeModel);
         assert!(run(&*default_detector, &default_project).is_empty());
 
-        let opts = SlopOptions { include_test_files: true };
+        let opts = SlopOptions { include_test_files: true, ..SlopOptions::default() };
         let opt_in_detector = only(detectors(&opts), SlopKind::SpeculativeModel);
         assert_eq!(run(&*opt_in_detector, &default_project).len(), 1);
     }

@@ -43,10 +43,12 @@ pub enum SlopKind {
     ScopeInflation,
     IntroducedReinvention,
     GeneratedSurfaceBurst,
+    PassThroughModule,
+    OversplitModule,
 }
 
 impl SlopKind {
-    pub const ALL: [Self; 23] = [
+    pub const ALL: [Self; 25] = [
         Self::SuppressionChain,
         Self::SwallowedFailure,
         Self::UnresolvedApi,
@@ -70,6 +72,8 @@ impl SlopKind {
         Self::ScopeInflation,
         Self::IntroducedReinvention,
         Self::GeneratedSurfaceBurst,
+        Self::PassThroughModule,
+        Self::OversplitModule,
     ];
 
     pub const fn cli_name(self) -> &'static str {
@@ -97,6 +101,8 @@ impl SlopKind {
             Self::ScopeInflation => "scope-inflation",
             Self::IntroducedReinvention => "introduced-reinvention",
             Self::GeneratedSurfaceBurst => "generated-surface-burst",
+            Self::PassThroughModule => "pass-through-module",
+            Self::OversplitModule => "oversplit-module",
         }
     }
 
@@ -125,6 +131,8 @@ impl SlopKind {
             Self::ScopeInflation => "Scope inflation",
             Self::IntroducedReinvention => "Introduced reinvention",
             Self::GeneratedSurfaceBurst => "Generated surface burst",
+            Self::PassThroughModule => "Pass-through module",
+            Self::OversplitModule => "Oversplit module",
         }
     }
 
@@ -153,6 +161,8 @@ impl SlopKind {
             Self::ScopeInflation => 20,
             Self::IntroducedReinvention => 21,
             Self::GeneratedSurfaceBurst => 22,
+            Self::PassThroughModule => 23,
+            Self::OversplitModule => 24,
         }
     }
 
@@ -164,7 +174,11 @@ impl SlopKind {
     }
 
     pub fn from_cli_name(name: &str) -> Option<Self> {
-        Self::ALL.into_iter().find(|kind| kind.cli_name() == name)
+        match name {
+            "passThroughModule" => Some(Self::PassThroughModule),
+            "oversplitModule" => Some(Self::OversplitModule),
+            _ => Self::ALL.into_iter().find(|kind| kind.cli_name() == name),
+        }
     }
 }
 
@@ -824,10 +838,22 @@ pub struct AnalysisCoverage {
     pub unsupported_offline_proofs: BTreeSet<OfflineProof>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ModuleShape {
+    #[default]
+    NoExports,
+    Exports,
+    PassThrough,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileFacts {
     pub path: String,
+    pub module_span: Option<SourceSpan>,
+    pub module_shape: ModuleShape,
+    pub module_sources: BTreeSet<String>,
     pub analysis_complete: bool,
     pub is_test: bool,
     pub is_generated: bool,
@@ -887,6 +913,7 @@ pub struct ProjectFacts {
     pub root: String,
     pub files: BTreeMap<String, FileFacts>,
     pub entrypoints: BTreeSet<String>,
+    pub module_importers: BTreeMap<String, BTreeSet<String>>,
     pub declaration_metadata: BTreeMap<SymbolKey, DeclarationMetadata>,
     pub reinvention_matches: Vec<ReinventionMatch>,
     pub symbol_uses: BTreeMap<SymbolKey, Vec<SourceSpan>>,
@@ -935,9 +962,21 @@ pub trait Detector: Send + Sync {
     fn detect(&self, facts: &ProjectFacts) -> Vec<SlopFinding>;
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct SlopOptions {
     pub include_test_files: bool,
+    pub oversplit_max_lines: u32,
+    pub oversplit_allow_importer: ignore::gitignore::Gitignore,
+}
+
+impl Default for SlopOptions {
+    fn default() -> Self {
+        Self {
+            include_test_files: false,
+            oversplit_max_lines: 30,
+            oversplit_allow_importer: ignore::gitignore::Gitignore::empty(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
