@@ -127,14 +127,14 @@ const fn confidence_rank(confidence: SlopConfidence) -> u8 {
     }
 }
 
-const fn confidence_name(confidence: SlopConfidence) -> &'static str {
+pub const fn confidence_name(confidence: SlopConfidence) -> &'static str {
     match confidence {
         SlopConfidence::High => "High",
         SlopConfidence::Medium => "Medium",
     }
 }
 
-fn display_span(span: &SourceSpan) -> String {
+pub fn display_span(span: &SourceSpan) -> String {
     if span.start_line == span.end_line {
         format!("{}:{}", span.path, span.start_line)
     } else {
@@ -142,7 +142,7 @@ fn display_span(span: &SourceSpan) -> String {
     }
 }
 
-fn escape_markdown(value: &str) -> String {
+pub fn escape_markdown(value: &str) -> String {
     value
         .replace('\\', "\\\\")
         .replace('|', "\\|")

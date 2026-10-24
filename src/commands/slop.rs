@@ -18,7 +18,7 @@ pub fn run(args: &SlopArgs) -> Result<()> {
     write_report(&report, format, &mut stdout.lock())
 }
 
-fn analyze(args: &SlopArgs) -> Result<SlopReport> {
+pub fn analyze(args: &SlopArgs) -> Result<SlopReport> {
     let filter = validate_filter_args(args)?;
     let mut allowed = ignore::gitignore::GitignoreBuilder::new("");
     for pattern in &args.oversplit_allow_importer {

@@ -14,6 +14,7 @@ A fast, deterministic static-analysis and search CLI for TypeScript and JavaScri
 - **Similarity detection** — APTED-based function and type comparison, including type literals
 - **Slop review signals** — evidence-backed exact, contextual, test-theater, and opt-in diff findings
 - **Project tree** — compact repository structure for quick orientation
+- **Project xray** — one-page overview of shape, hotspots, slop, and duplicates
 - **Agent-friendly** — deterministic output suitable for scripts and coding agents
 
 ## Install
@@ -46,6 +47,7 @@ scanr rename Card ProfileCard --root .
 scanr dupes --root . --types
 scanr slop --root .
 scanr tree --root .
+scanr xray --root .
 ```
 
 ## Commands
@@ -267,18 +269,39 @@ Health controls:
 
 Medium/high thresholds are respectively: file lines `300/500`, total functions `15/30`, anonymous callbacks `10/20`, total parent-variable uses `15/30`, duplicate removable lines `10/30`, branch complexity `8/15`, control nesting `3/5`, hooks `8/15`, state calls `4/8`, effect calls `3/5`, dependencies `15/25`, and exports `8/15`. Wrapper density is reported at three or more wrappers and 30% (medium) or 50% (high).
 
+### `scanr xray`
+
+Print a one-page project overview for an agent opening an unknown repository:
+
+```bash
+scanr xray
+scanr xray --root apps/web --top 5
+scanr xray --json
+```
+
+It combines data from the other commands into four sections: **Shape** (file, line, and function counts plus the largest folders), **Hotspots** (files over `tree --health` thresholds, ranked by severity), **Slop** (finding counts per kind plus the top findings, High confidence first), and **Duplicates** (similar-function groups ranked by estimated removable lines). Tests, declaration files, and generated files are excluded. Markdown is the default; `--json` emits `{version,root,shape,hotspots,slop,duplicates}`.
+
+Flags:
+
+- `--root <path>` — project root (default `.`)
+- `--top <n>` — maximum rows per section (default `10`)
+- `--json` — emit JSON instead of Markdown
+
+Each section points to the command with full detail: `tree --health`, `slop`, and `dupes`.
+
 ## Agent workflow
 
-1. `scanr scan --mode inventory --root .` — name lists first (functions, constants, types, components, hooks, classes, enums, exports).
-2. `scanr refs <name> --root .` — declarations and usage sites for a name.
-3. `scanr rename <Name|file#Name> <NewName> --root . --dry-run` — preview a type-accurate rename, then rerun without `--dry-run` and review `leftovers`.
-4. `scanr slop --root .` — review exact, contextual, and test-theater signals one finding per row.
-5. `scanr slop --root . --base HEAD~1` — add the three tracked-working-tree diff signals.
-6. `scanr tree --health --only-findings --top 20` — rank metric-backed hotspots.
-7. `scanr tree --functions --function-details --path <hotspot>` — inspect ownership and similarity in context.
-8. `scanr scan --mode verbose --rules hoistable_nested_function,low_value_function` — inspect captures and rule evidence.
-9. `scanr dupes --types` — inspect similar function/type pairs.
-10. `scanr search <name> --json` — literal hunt when refs is too narrow.
+1. `scanr xray --root .` — one-page overview before anything else.
+2. `scanr scan --mode inventory --root .` — name lists first (functions, constants, types, components, hooks, classes, enums, exports).
+3. `scanr refs <name> --root .` — declarations and usage sites for a name.
+4. `scanr rename <Name|file#Name> <NewName> --root . --dry-run` — preview a type-accurate rename, then rerun without `--dry-run` and review `leftovers`.
+5. `scanr slop --root .` — review exact, contextual, and test-theater signals one finding per row.
+6. `scanr slop --root . --base HEAD~1` — add the three tracked-working-tree diff signals.
+7. `scanr tree --health --only-findings --top 20` — rank metric-backed hotspots.
+8. `scanr tree --functions --function-details --path <hotspot>` — inspect ownership and similarity in context.
+9. `scanr scan --mode verbose --rules hoistable_nested_function,low_value_function` — inspect captures and rule evidence.
+10. `scanr dupes --types` — inspect similar function/type pairs.
+11. `scanr search <name> --json` — literal hunt when refs is too narrow.
 
 ## Development
 

@@ -1545,7 +1545,7 @@ fn is_test_path(path: &str) -> bool {
         || [".test.", ".spec.", "_test.", "_spec."].iter().any(|needle| lower.contains(needle))
 }
 
-fn is_generated_path(path: &str, source: &str) -> bool {
+pub fn is_generated_path(path: &str, source: &str) -> bool {
     let lower = path.to_ascii_lowercase();
     lower.ends_with(".d.ts")
         || lower.contains(".generated.")

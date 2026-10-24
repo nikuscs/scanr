@@ -1,6 +1,6 @@
 ---
 name: ts-code-scan
-description: "constants, types, functions, tree, slop, refs, rename, census, dupes, and search for offline TypeScript and JavaScript"
+description: "xray overview, constants, types, functions, tree, slop, refs, rename, census, dupes, and search for offline TypeScript and JavaScript"
 allowed-tools: Bash, Read
 ---
 
@@ -13,6 +13,16 @@ scanr scan --mode inventory --root <path>
 ```
 
 Done when `stats.parsed == stats.files` and `stats.errors == 0`. List nonzero `skipped`/`errors`. Then answer from the JSON keys below. Add `--lines` only if the user wants line numbers.
+
+## Xray a project
+
+When the user wants a quick overview of an unfamiliar repo:
+
+```bash
+scanr xray --root <path>
+```
+
+One Markdown page: shape, health hotspots, slop counts, and duplicate groups. `--top <n>` limits rows per section; `--json` for structured output. Return the output as printed, then drill in with `tree --health`, `slop`, or `dupes`.
 
 ## Get all constants
 

@@ -139,15 +139,11 @@ pub fn run(
     Ok(())
 }
 
-fn build_function_annotations(
+pub fn parse_project(
     scan_root: &Path,
     project_root: &Path,
-    all_functions: bool,
-    low_value_max_lines: u32,
-    duplicate_threshold: f64,
-    include_health: bool,
     include_tests: bool,
-) -> Result<BTreeMap<String, FunctionAnnotations>> {
+) -> Result<(Vec<FileIndex>, Vec<SimilarityFile>)> {
     let files = collect_files(scan_root, &ScanConfig::default())?;
     let files: Vec<_> = files
         .into_iter()
@@ -157,8 +153,19 @@ fn build_function_annotations(
         .par_iter()
         .map(|path| process_file_with_similarity(path, project_root, FunctionKindsFilter::All))
         .collect();
-    let parsed = parsed.into_iter().collect::<Result<Vec<_>>>()?;
-    let (indices, similarity_files): (Vec<_>, Vec<_>) = parsed.into_iter().unzip();
+    Ok(parsed.into_iter().collect::<Result<Vec<_>>>()?.into_iter().unzip())
+}
+
+fn build_function_annotations(
+    scan_root: &Path,
+    project_root: &Path,
+    all_functions: bool,
+    low_value_max_lines: u32,
+    duplicate_threshold: f64,
+    include_health: bool,
+    include_tests: bool,
+) -> Result<BTreeMap<String, FunctionAnnotations>> {
+    let (indices, similarity_files) = parse_project(scan_root, project_root, include_tests)?;
     let duplicate_groups = function_duplicate_groups(&similarity_files, duplicate_threshold, 1)?;
     let similarity_by_path: BTreeMap<_, _> =
         similarity_files.iter().map(|file| (file.path.as_str(), file)).collect();
@@ -292,14 +299,14 @@ struct FunctionAnnotations {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum HealthSeverity {
+pub enum HealthSeverity {
     None,
     Medium,
     High,
 }
 
 impl HealthSeverity {
-    const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::None => "OK",
             Self::Medium => "MEDIUM",
@@ -310,39 +317,39 @@ impl HealthSeverity {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct HealthFinding {
-    kind: String,
-    severity: HealthSeverity,
-    message: String,
+pub struct HealthFinding {
+    pub kind: String,
+    pub severity: HealthSeverity,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct FileHealth {
-    path: String,
-    severity: HealthSeverity,
-    lines: usize,
-    largest_function: Option<String>,
-    largest_function_lines: u32,
-    named_functions: usize,
-    anonymous_callbacks: usize,
-    nested_functions: usize,
-    max_function_nesting: usize,
-    capture_total: usize,
-    capture_max: usize,
-    trivial_wrappers: usize,
-    wrapper_density_percent: usize,
-    duplicate_groups: usize,
-    duplicate_functions: usize,
-    estimated_removable_lines: usize,
-    max_branch_complexity: usize,
-    max_control_nesting: usize,
-    hook_calls: usize,
-    state_calls: usize,
-    effect_calls: usize,
-    exports: usize,
-    dependencies: usize,
-    findings: Vec<HealthFinding>,
+pub struct FileHealth {
+    pub path: String,
+    pub severity: HealthSeverity,
+    pub lines: usize,
+    pub largest_function: Option<String>,
+    pub largest_function_lines: u32,
+    pub named_functions: usize,
+    pub anonymous_callbacks: usize,
+    pub nested_functions: usize,
+    pub max_function_nesting: usize,
+    pub capture_total: usize,
+    pub capture_max: usize,
+    pub trivial_wrappers: usize,
+    pub wrapper_density_percent: usize,
+    pub duplicate_groups: usize,
+    pub duplicate_functions: usize,
+    pub estimated_removable_lines: usize,
+    pub max_branch_complexity: usize,
+    pub max_control_nesting: usize,
+    pub hook_calls: usize,
+    pub state_calls: usize,
+    pub effect_calls: usize,
+    pub exports: usize,
+    pub dependencies: usize,
+    pub findings: Vec<HealthFinding>,
 }
 
 #[derive(Debug, Serialize)]
@@ -353,7 +360,7 @@ struct HealthReport {
     files: Vec<FileHealth>,
 }
 
-fn build_file_health(
+pub fn build_file_health(
     index: &FileIndex,
     similarity: &SimilarityFile,
     duplicate_groups: &BTreeMap<FunctionDuplicateKey, Vec<FunctionDuplicateKey>>,
@@ -762,20 +769,7 @@ fn render_file_list(files: &[FileEntry], lines: &mut Vec<String>, indent: &str, 
     }
 }
 
-#[allow(clippy::too_many_lines)]
-fn write_health_report(
-    tree: &TreeNode,
-    root: &str,
-    only_findings: bool,
-    top: Option<usize>,
-    sort_by: HealthSort,
-    json: bool,
-) -> Result<()> {
-    let mut files = Vec::new();
-    collect_file_health(tree, &mut files);
-    if only_findings {
-        files.retain(|file| !file.findings.is_empty());
-    }
+pub fn sort_health(files: &mut [FileHealth], sort_by: HealthSort) {
     files.sort_by(|left, right| {
         let order = match sort_by {
             HealthSort::Severity => right
@@ -794,6 +788,22 @@ fn write_health_report(
         };
         order.then_with(|| left.path.cmp(&right.path))
     });
+}
+
+fn write_health_report(
+    tree: &TreeNode,
+    root: &str,
+    only_findings: bool,
+    top: Option<usize>,
+    sort_by: HealthSort,
+    json: bool,
+) -> Result<()> {
+    let mut files = Vec::new();
+    collect_file_health(tree, &mut files);
+    if only_findings {
+        files.retain(|file| !file.findings.is_empty());
+    }
+    sort_health(&mut files, sort_by);
     if let Some(limit) = top {
         files.truncate(limit);
     }

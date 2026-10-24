@@ -99,6 +99,9 @@ pub enum Commands {
         json: bool,
     },
 
+    /// One-page project overview: shape, hotspots, slop, and duplicates
+    Xray(XrayArgs),
+
     /// Structural scan: extract functions, bindings, and exports from TypeScript/JavaScript files
     Scan(ScanArgs),
 }
@@ -173,6 +176,21 @@ pub struct SlopArgs {
     pub oversplit_allow_importer: Vec<String>,
 
     /// Emit stable schema-versioned JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Clone)]
+pub struct XrayArgs {
+    /// Project root directory
+    #[arg(long, default_value = ".")]
+    pub root: String,
+
+    /// Maximum rows per section
+    #[arg(long, default_value_t = 10)]
+    pub top: usize,
+
+    /// Emit structured JSON instead of Markdown
     #[arg(long)]
     pub json: bool,
 }

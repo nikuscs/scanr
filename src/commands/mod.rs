@@ -5,3 +5,4 @@ pub mod scan;
 pub mod search;
 pub mod slop;
 pub mod tree;
+pub mod xray;

@@ -57,5 +57,6 @@ fn main() -> Result<()> {
             json,
         ),
         Commands::Scan(args) => commands::scan::run(&args),
+        Commands::Xray(args) => commands::xray::run(&args),
     }
 }
