@@ -11,7 +11,7 @@
       "name": "scanr",
       "source": "./plugin",
       "description": "Offline TypeScript/JavaScript analysis, grep, similarity detection, and project tree views",
-      "version": "0.4.0",
+      "version": "0.5.0",
       "license": "MIT",
       "keywords": [
         "search",
