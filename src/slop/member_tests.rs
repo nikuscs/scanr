@@ -89,7 +89,7 @@ fn factory_globs_exports_tests_and_whole_object_hand_offs_limit_the_scan() {
         ),
         (
             "src/tools.ts",
-            "export const makeTools = () => ({ search_products: () => 1, list_orders: () => 2 });\nexport function makeHandlers() { return { onOpen: () => 1, onClose: () => 2 }; }\nfunction makeLocal() { return { hidden: 1 }; }\nmakeLocal();\n",
+            "export const makeTools = () => ({ search_products: () => 1, list_orders: () => 2 });\nexport function makeHandlers() { return { onOpen: () => 1, onClose: () => 2 }; }\nfunction makeLocal() { return { hidden: () => 1 }; }\nmakeLocal();\n",
         ),
         (
             "src/chat.ts",
@@ -97,12 +97,13 @@ fn factory_globs_exports_tests_and_whole_object_hand_offs_limit_the_scan() {
         ),
         (
             "tests/fixtures.ts",
-            "export function makeFixture() { return { unused: 1, used: 2 }; }\nmakeFixture().used;\n",
+            "export function makeFixture() { return { unused: () => 1, used: () => 2 }; }\nmakeFixture().used();\n",
         ),
     ]);
     assert_eq!(unused(&project, &["make*Service"]), unused(&project, &["make*"]));
-    assert!(
-        unused(&project, &["makeTools", "makeHandlers", "makeLocal", "makeFixture"]).is_empty()
+    assert_eq!(
+        unused(&project, &["makeTools", "makeHandlers", "makeLocal", "makeFixture"]),
+        [] as [String; 0]
     );
 }
 
