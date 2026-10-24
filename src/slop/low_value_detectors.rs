@@ -230,7 +230,10 @@ mod tests {
         let project = facts(
             "function outer() { function nested(value: number) { return value; } return nested(1); }\nouter();\n",
         );
-        assert!(LowValueLocalHelper { include_test_files: false }.detect(&project).is_empty());
+        assert_eq!(
+            LowValueLocalHelper { include_test_files: false }.detect(&project),
+            [] as [crate::slop::types::SlopFinding; 0]
+        );
     }
 
     #[test]

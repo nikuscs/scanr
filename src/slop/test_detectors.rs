@@ -1050,7 +1050,10 @@ mod tests {
 
         let first = project.assertions.values_mut().next().unwrap();
         first.boundary = AssertionBoundary::BooleanEdge;
-        assert!(AssertionMonoculture::default().detect(&project).is_empty());
+        assert_eq!(
+            AssertionMonoculture::default().detect(&project),
+            [] as [crate::slop::types::SlopFinding; 0]
+        );
     }
 
     #[test]
@@ -1059,7 +1062,10 @@ mod tests {
         for test in project.tests.values_mut().skip(6) {
             test.mode = TestMode::Parameterized;
         }
-        assert!(AssertionMonoculture::default().detect(&project).is_empty());
+        assert_eq!(
+            AssertionMonoculture::default().detect(&project),
+            [] as [crate::slop::types::SlopFinding; 0]
+        );
     }
 
     #[test]
@@ -1137,7 +1143,10 @@ mod tests {
             });
             project.call_roles.insert(key, CallRole::Sut);
         }
-        assert!(MockDominatedTest::default().detect(&project).is_empty());
+        assert_eq!(
+            MockDominatedTest::default().detect(&project),
+            [] as [crate::slop::types::SlopFinding; 0]
+        );
     }
 
     #[test]
@@ -1155,7 +1164,10 @@ mod tests {
         for test in project.tests.values_mut() {
             test.body_shape.literal_vector = vec!["same".to_string(), "200".to_string()];
         }
-        assert!(DuplicatedTestBody::default().detect(&project).is_empty());
+        assert_eq!(
+            DuplicatedTestBody::default().detect(&project),
+            [] as [crate::slop::types::SlopFinding; 0]
+        );
     }
 
     #[test]

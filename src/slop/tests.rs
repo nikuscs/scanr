@@ -72,7 +72,7 @@ test.skip("does not run", () => { expect(example("x")).toBeTruthy(); });
             .any(|call| call.callee_path.last().is_some_and(|name| name == "save"))
     );
     assert_eq!(facts.tests.len(), 1);
-    assert!(!facts.tests[0].assertion_spans.is_empty());
+    assert_ne!(facts.tests[0].assertion_spans, [] as [crate::slop::types::SourceSpan; 0]);
     assert_eq!(facts.branches.len(), 1);
     assert!(facts.branches[0].unreachable_span.is_some());
     assert!(facts.runtime_lines.iter().all(|line| *line > 0));

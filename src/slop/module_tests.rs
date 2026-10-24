@@ -87,7 +87,10 @@ fn oversplit_resolves_dotted_modules_and_nearest_package_aliases() {
         ("apps/api/src/third.ts", "import { a } from '#tiny';"),
     ]);
     assert_eq!(project.module_importers["apps/api/src/tiny.constants.ts"].len(), 3);
-    assert!(findings(&project, SlopKind::OversplitModule, &SlopOptions::default()).is_empty());
+    assert_eq!(
+        findings(&project, SlopKind::OversplitModule, &SlopOptions::default()),
+        [] as [crate::slop::types::SlopFinding; 0]
+    );
 }
 
 #[test]
@@ -131,7 +134,10 @@ fn oversplit_counts_reexports_namespace_and_static_dynamic_imports() {
             ("first.ts", "import { a } from './tiny'; console.log(a);"),
             ("second.ts", second),
         ]);
-        assert!(findings(&project, SlopKind::OversplitModule, &SlopOptions::default()).is_empty());
+        assert_eq!(
+            findings(&project, SlopKind::OversplitModule, &SlopOptions::default()),
+            [] as [crate::slop::types::SlopFinding; 0]
+        );
     }
 }
 
@@ -146,9 +152,9 @@ fn oversplit_requires_exports_and_a_consumer_not_side_effects() {
         vec![("tiny.ts", "export const a = 1;"), ("consumer.ts", "import './tiny';")],
         vec![("tiny.ts", "const a = 1;"), ("consumer.ts", "import * as tiny from './tiny';")],
     ] {
-        assert!(
-            findings(&project(&files), SlopKind::OversplitModule, &SlopOptions::default())
-                .is_empty()
+        assert_eq!(
+            findings(&project(&files), SlopKind::OversplitModule, &SlopOptions::default()),
+            [] as [crate::slop::types::SlopFinding; 0]
         );
     }
 }
@@ -166,9 +172,9 @@ fn oversplit_ignores_generated_importers_but_keeps_real_consumers() {
         let files = [("tiny.ts", "export const a = 1;"), (path, source)];
         let generated_only = project(&files);
         assert!(generated_only.files[path].is_generated);
-        assert!(
-            findings(&generated_only, SlopKind::OversplitModule, &SlopOptions::default())
-                .is_empty()
+        assert_eq!(
+            findings(&generated_only, SlopKind::OversplitModule, &SlopOptions::default()),
+            [] as [crate::slop::types::SlopFinding; 0]
         );
         let mut files = files.to_vec();
         files.push(("consumer.ts", "import { a } from './tiny';"));
@@ -187,7 +193,10 @@ fn oversplit_line_limit_is_inclusive_and_counts_comments_and_blank_lines() {
     let mut options = SlopOptions::default();
     assert_eq!(findings(&project, SlopKind::OversplitModule, &options).len(), 1);
     options.oversplit_max_lines = 29;
-    assert!(findings(&project, SlopKind::OversplitModule, &options).is_empty());
+    assert_eq!(
+        findings(&project, SlopKind::OversplitModule, &options),
+        [] as [crate::slop::types::SlopFinding; 0]
+    );
 }
 
 #[test]
@@ -208,7 +217,10 @@ fn importer_globs_exempt_only_matching_consumers() {
         oversplit_allow_importer: builder.build().unwrap(),
         ..SlopOptions::default()
     };
-    assert!(findings(&project, SlopKind::OversplitModule, &options).is_empty());
+    assert_eq!(
+        findings(&project, SlopKind::OversplitModule, &options),
+        [] as [crate::slop::types::SlopFinding; 0]
+    );
     assert_eq!(findings(&project, SlopKind::OversplitModule, &SlopOptions::default()).len(), 3);
 }
 

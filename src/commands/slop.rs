@@ -158,7 +158,7 @@ mod tests {
         assert_eq!(report.version, 1);
         assert_eq!(report.root, root.path().canonicalize().unwrap().to_string_lossy());
         assert!(report.diff.is_none());
-        assert!(report.findings.is_empty());
+        assert_eq!(report.findings, [] as [crate::slop::types::SlopFinding; 0]);
     }
 
     #[test]

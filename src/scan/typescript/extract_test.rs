@@ -180,7 +180,7 @@ fn nested_functions_record_parents_and_enclosing_captures() {
         .find(|function| function.name.as_deref() == Some("hoistable"))
         .unwrap();
     assert_eq!(hoistable.parent.as_deref(), Some("Component"));
-    assert!(hoistable.captures.is_empty());
+    assert_eq!(hoistable.captures, [] as [String; 0]);
 
     let captured = result
         .functions

@@ -886,7 +886,10 @@ mod tests {
             scope: scope("a.ts"),
             callback: Resolution::Unknown { reason: "not summarized".to_string() },
         });
-        assert!(SwallowedFailureDetector.detect(&project(vec![facts])).is_empty());
+        assert_eq!(
+            SwallowedFailureDetector.detect(&project(vec![facts])),
+            [] as [crate::slop::types::SlopFinding; 0]
+        );
     }
 
     fn import(
@@ -1161,7 +1164,13 @@ mod tests {
             },
             ..project(vec![incomplete, generated])
         };
-        assert!(SwallowedFailureDetector.detect(&project).is_empty());
-        assert!(SuppressionChainDetector.detect(&project).is_empty());
+        assert_eq!(
+            SwallowedFailureDetector.detect(&project),
+            [] as [crate::slop::types::SlopFinding; 0]
+        );
+        assert_eq!(
+            SuppressionChainDetector.detect(&project),
+            [] as [crate::slop::types::SlopFinding; 0]
+        );
     }
 }

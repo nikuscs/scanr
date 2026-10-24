@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn scan_config_default_exclude_is_empty() {
         let cfg = ScanConfig::default();
-        assert!(cfg.exclude.is_empty());
+        assert_eq!(cfg.exclude, [] as [String; 0]);
     }
 
     #[test]
@@ -310,7 +310,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let config = ScanConfig::default();
         let files = collect_files(dir.path(), &config).unwrap();
-        assert!(files.is_empty());
+        assert_eq!(files, [] as [std::path::PathBuf; 0]);
     }
 
     // ── scan_directory ───────────────────────────────────────────────
@@ -330,7 +330,7 @@ mod tests {
         assert_eq!(result.stats.skipped, 0);
         assert_eq!(result.stats.errors, 0);
         assert_eq!(result.file_indices.len(), 2);
-        assert!(result.errors.is_empty());
+        assert_eq!(result.errors, [] as [String; 0]);
     }
 
     #[test]

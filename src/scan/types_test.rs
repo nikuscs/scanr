@@ -33,8 +33,8 @@ fn function_kind_labels_and_codes_cover_all() {
     for k in kinds {
         let code = k.code();
         let label = k.label();
-        assert!(!code.is_empty());
-        assert!(!label.is_empty());
+        assert_ne!(code, "");
+        assert_ne!(label, "");
     }
 }
 
@@ -101,7 +101,7 @@ fn binding_kind_strings_and_export_codes_are_covered() {
         BindingKind::Enum,
     ];
     for k in kinds {
-        assert!(!k.as_str().is_empty());
+        assert_ne!(k.as_str(), "");
     }
     assert_eq!(EXPORT_NAMED, 1);
     assert_eq!(EXPORT_DEFAULT, 2);

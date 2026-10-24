@@ -205,7 +205,10 @@ mod tests {
         assert_eq!(result[0].kind, SlopKind::SuppressionChain);
 
         let empty = SlopFilter { top: Some(0), ..SlopFilter::default() };
-        assert!(filter_and_sort_findings(result, &empty).is_empty());
+        assert_eq!(
+            filter_and_sort_findings(result, &empty),
+            [] as [crate::slop::types::SlopFinding; 0]
+        );
     }
 
     #[test]

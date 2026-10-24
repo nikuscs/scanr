@@ -1128,7 +1128,7 @@ export function ticket(cents: number): string {
             ("report.ts", importer),
         ]);
         let detector = only(detectors(&options()), SlopKind::ReinventedHelper);
-        assert!(run(&*detector, &project).is_empty());
+        assert_eq!(run(&*detector, &project), [] as [crate::slop::types::SlopFinding; 0]);
     }
 
     #[test]
@@ -1146,7 +1146,7 @@ export function ticket(cents: number): string {
         let detector = only(detectors(&options()), SlopKind::ReinventedHelper);
         let findings = run(&*detector, &project);
         // report.ts reimplements; exemplar is the lexicographically smallest established file.
-        assert!(!findings.is_empty());
+        assert_ne!(findings, [] as [crate::slop::types::SlopFinding; 0]);
         let report_finding = findings.iter().find(|f| f.span.path == "report.ts").unwrap();
         let exemplar = &report_finding.evidence[1];
         assert_eq!(exemplar.span.path, "alt.ts");
@@ -1175,7 +1175,7 @@ export function ticket(cents: number): string {
             "function handle(user: { id: string } | null): string {\n  if (user == null) { return 'x'; }\n  return user.id;\n}\n",
         )]);
         let detector = only(detectors(&options()), SlopKind::RedundantDefense);
-        assert!(run(&*detector, &project).is_empty());
+        assert_eq!(run(&*detector, &project), [] as [crate::slop::types::SlopFinding; 0]);
     }
 
     #[test]
@@ -1187,7 +1187,7 @@ export function ticket(cents: number): string {
             "export function handle(user: { id: string }): string {\n  if (user == null) { return 'x'; }\n  return user.id;\n}\n",
         )]);
         let detector = only(detectors(&options()), SlopKind::RedundantDefense);
-        assert!(run(&*detector, &project).is_empty());
+        assert_eq!(run(&*detector, &project), [] as [crate::slop::types::SlopFinding; 0]);
     }
 
     #[test]
@@ -1212,7 +1212,7 @@ export function ticket(cents: number): string {
             "function handle(value: { child: string | null }): string {\n  if (value.child !== null) return value.child;\n  const map = new Map<string, string>();\n  return map.get('fallback')!;\n}\n",
         )]);
         let detector = only(detectors(&options()), SlopKind::RedundantDefense);
-        assert!(run(&*detector, &project).is_empty());
+        assert_eq!(run(&*detector, &project), [] as [crate::slop::types::SlopFinding; 0]);
     }
 
     // --- 3. OneUseAbstraction -----------------------------------------------
@@ -1285,7 +1285,7 @@ export function ticket(cents: number): string {
             "declare function castA(v: unknown): unknown;\ndeclare function castB(v: unknown): unknown;\ndeclare function castC(v: unknown): unknown;\nexport function build(raw: unknown): unknown { return castC(castB(castA(raw))); }\n",
         )]);
         let detector = only(detectors(&options()), SlopKind::PatchStack);
-        assert!(run(&*detector, &project).is_empty());
+        assert_eq!(run(&*detector, &project), [] as [crate::slop::types::SlopFinding; 0]);
     }
 
     #[test]
@@ -1304,7 +1304,7 @@ export function ticket(cents: number): string {
             "declare function castA(v: unknown): unknown;\ndeclare function withDefault(v: unknown): unknown;\nexport function build(raw: unknown): unknown { return castA(withDefault(raw)); }\n",
         )]);
         let detector = only(detectors(&options()), SlopKind::PatchStack);
-        assert!(run(&*detector, &two_ops).is_empty());
+        assert_eq!(run(&*detector, &two_ops), [] as [crate::slop::types::SlopFinding; 0]);
     }
 
     // --- 5. SpeculativeModel -------------------------------------------------
@@ -1334,7 +1334,7 @@ export function ticket(cents: number): string {
             ),
         ]);
         let detector = only(detectors(&options()), SlopKind::SpeculativeModel);
-        assert!(run(&*detector, &project).is_empty());
+        assert_eq!(run(&*detector, &project), [] as [crate::slop::types::SlopFinding; 0]);
     }
 
     #[test]
@@ -1355,7 +1355,7 @@ export function ticket(cents: number): string {
             "export interface Dto { a?: string; b?: string; c: string }\n",
         )]);
         let detector = only(detectors(&options()), SlopKind::SpeculativeModel);
-        assert!(run(&*detector, &project).is_empty());
+        assert_eq!(run(&*detector, &project), [] as [crate::slop::types::SlopFinding; 0]);
     }
 
     // --- 6. CommentInversion -------------------------------------------------
@@ -1414,7 +1414,7 @@ export function classify(n: number): number {
 ";
         let project = facts_from(&[("mod.ts", documented)]);
         let detector = only(detectors(&options()), SlopKind::CommentInversion);
-        assert!(run(&*detector, &project).is_empty());
+        assert_eq!(run(&*detector, &project), [] as [crate::slop::types::SlopFinding; 0]);
     }
 
     // --- 7. ParallelRepresentation ------------------------------------------
@@ -1438,7 +1438,7 @@ export function classify(n: number): number {
             "export interface UserA { id: string; name: string }\nexport interface UserB { id: string; name: string }\n",
         )]);
         let detector = only(detectors(&options()), SlopKind::ParallelRepresentation);
-        assert!(run(&*detector, &project).is_empty());
+        assert_eq!(run(&*detector, &project), [] as [crate::slop::types::SlopFinding; 0]);
     }
 
     #[test]
@@ -1502,7 +1502,7 @@ export const value = 4;
 ";
         let project = facts_from(&[("mod.ts", simple)]);
         let detector = only(detectors(&options()), SlopKind::GenericNameCluster);
-        assert!(run(&*detector, &project).is_empty());
+        assert_eq!(run(&*detector, &project), [] as [crate::slop::types::SlopFinding; 0]);
     }
 
     // --- Cross-cutting: test-file exclusion ---------------------------------
@@ -1514,7 +1514,10 @@ export const value = 4;
             "interface InternalShape { a?: string; b?: string; c?: string; d?: string; e?: string; f: string }\n",
         )]);
         let default_detector = only(detectors(&options()), SlopKind::SpeculativeModel);
-        assert!(run(&*default_detector, &default_project).is_empty());
+        assert_eq!(
+            run(&*default_detector, &default_project),
+            [] as [crate::slop::types::SlopFinding; 0]
+        );
 
         let opts = SlopOptions { include_test_files: true, ..SlopOptions::default() };
         let opt_in_detector = only(detectors(&opts), SlopKind::SpeculativeModel);
