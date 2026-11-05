@@ -337,3 +337,86 @@ fn type_aware_members_match_the_dead_code_report_shapes() {
     expected.sort_unstable();
     assert_eq!(found, expected, "{}", String::from_utf8_lossy(&output.stdout));
 }
+
+/// A project with one dead and one used member, and a `bun` on PATH that answers the members
+/// worker with `reply` and `exit`, the way a crashed or partly failed worker does.
+#[cfg(unix)]
+fn run_with_fake_worker(reply: impl Fn(&Path) -> String, exit: i32) -> (serde_json::Value, String) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = tempdir().unwrap();
+    write(root.path(), "tsconfig.json", r#"{"include":["src"]}"#);
+    write(
+        root.path(),
+        "src/cart.service.ts",
+        "export function makeCartService() {\n  return { pay: () => 1, refund: () => 2 };\n}\nmakeCartService().pay();\n",
+    );
+    let bin = tempdir().unwrap();
+    let canonical = root.path().canonicalize().unwrap();
+    fs::write(bin.path().join("reply.txt"), reply(&canonical)).unwrap();
+    let script = format!(
+        "#!/bin/sh\n[ \"$1\" = --version ] && exit 0\ncat >/dev/null\ncat '{}'\necho 'error: Debug Failure. False expression: parameter should have errors when reporting errors' >&2\nexit {exit}\n",
+        bin.path().join("reply.txt").display()
+    );
+    let bun = bin.path().join("bun");
+    fs::write(&bun, script).unwrap();
+    fs::set_permissions(&bun, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = format!("{}:{}", bin.path().display(), std::env::var("PATH").unwrap_or_default());
+    let output = Command::cargo_bin("scanr")
+        .unwrap()
+        .env("PATH", path)
+        .args(["slop", "--root", root.path().to_str().unwrap(), "--type-aware", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let members = report["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|finding| {
+            let detail = finding["evidence"][0]["detail"].as_str().unwrap();
+            format!("{} {}", finding["kind"].as_str().unwrap(), detail.split('`').nth(3).unwrap())
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    (report, members)
+}
+
+#[cfg(unix)]
+#[test]
+fn a_crashed_type_aware_worker_keeps_the_rest_of_the_run() {
+    let (report, members) = run_with_fake_worker(|_| String::new(), 1);
+    assert_eq!(members, "unusedFactoryMember refund");
+    let warnings = report["warnings"].to_string();
+    assert!(warnings.contains("type-aware members skipped"), "{warnings}");
+    assert!(warnings.contains("error: Debug Failure."), "{warnings}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_checker_failure_on_one_file_skips_only_the_members_it_could_have_read() {
+    let reply = |root: &Path| {
+        let file = root.join("src/cart.service.ts").display().to_string();
+        let member = |path: &str, unresolved: bool| {
+            serde_json::json!({
+                "file": file, "factory": "makeCartService", "path": path,
+                "startByte": 0, "endByte": 1, "startLine": 2, "startColumn": 12, "endLine": 2, "endColumn": 13,
+                "wraps": false, "refs": [], "wired": [], "handedOff": [], "unresolved": unresolved,
+            })
+        };
+        serde_json::json!({
+            "ver": 1,
+            "status": "ok",
+            "members": [member("pay", true), member("refund", false)],
+            "failures": [{ "file": root.join("src/ai.ts").display().to_string(), "line": 26, "message": "Debug Failure." }],
+        })
+        .to_string()
+    };
+    let (report, members) = run_with_fake_worker(reply, 0);
+    assert_eq!(members, "unusedFactoryMember refund");
+    assert_eq!(
+        report["warnings"][0].as_str().unwrap(),
+        "type-aware members: the TypeScript checker failed at src/ai.ts:26, so members it could have read are not reported: Debug Failure."
+    );
+}
