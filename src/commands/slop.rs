@@ -42,9 +42,14 @@ pub fn analyze(args: &SlopArgs) -> Result<SlopReport> {
     if let Some(scope) = &diff {
         findings.extend(detect_diff_findings(&facts, scope));
     }
+    let mut warnings = Vec::new();
     if args.type_aware {
-        findings.retain(|finding| finding.kind != SlopKind::UnusedFactoryMember);
-        findings.extend(detect_type_aware(&root, &args.tsconfig, &args.member_factory)?);
+        let type_aware = detect_type_aware(&root, &args.tsconfig, &args.member_factory)?;
+        warnings = type_aware.warnings;
+        if let Some(type_aware) = type_aware.findings {
+            findings.retain(|finding| finding.kind != SlopKind::UnusedFactoryMember);
+            findings.extend(type_aware);
+        }
     }
     findings.retain(|finding| {
         args.include_test_files
@@ -57,6 +62,7 @@ pub fn analyze(args: &SlopArgs) -> Result<SlopReport> {
         root: root.to_string_lossy().to_string(),
         diff: diff.as_ref().map(crate::slop::diff::DiffScope::summary),
         findings,
+        warnings,
     })
 }
 

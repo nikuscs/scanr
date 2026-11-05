@@ -131,6 +131,7 @@ fn member(
         refs,
         wired,
         handed_off: Vec::new(),
+        unresolved: false,
     }
 }
 

@@ -31,9 +31,10 @@ pub fn run_worker<T: DeserializeOwned>(command: &str, request: &impl Serialize) 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let response: Value = serde_json::from_str(stdout.trim()).with_context(|| {
         format!(
-            "{command} worker returned invalid JSON (status {}): {stdout}{}",
+            "{command} worker returned invalid JSON (status {}): {}{}",
             output.status,
-            String::from_utf8_lossy(&output.stderr)
+            stdout.trim(),
+            stderr_summary(&output.stderr)
         )
     })?;
     match response.get("status").and_then(Value::as_str) {
@@ -41,14 +42,36 @@ pub fn run_worker<T: DeserializeOwned>(command: &str, request: &impl Serialize) 
             "{}",
             response.get("message").and_then(Value::as_str).unwrap_or("scanr worker failed")
         ),
-        _ if !output.status.success() => bail!(
-            "{command} worker exited {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        ),
+        _ if !output.status.success() => {
+            bail!("{command} worker exited {}: {}", output.status, stderr_summary(&output.stderr))
+        }
         Some("ok") => Ok(serde_json::from_value(response)?),
         status => bail!("{command} worker returned status {status:?}"),
     }
+}
+
+/// The runtime's error line and the stack under it, without colors or the source excerpt
+/// bun prints above it.
+fn stderr_summary(stderr: &[u8]) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    let mut plain = String::with_capacity(text.len());
+    let mut chars = text.chars();
+    while let Some(char) = chars.next() {
+        if char == '\u{1b}' {
+            chars.by_ref().find(char::is_ascii_alphabetic);
+        } else {
+            plain.push(char);
+        }
+    }
+    let lines = plain.lines().map(str::trim).filter(|line| !line.is_empty()).collect::<Vec<_>>();
+    let start =
+        lines.iter().position(|line| line.to_ascii_lowercase().starts_with("error")).unwrap_or(0);
+    lines[start..].iter().take(8).copied().collect::<Vec<_>>().join("\n")
+}
+
+/// Fails with the runtime requirement when neither bun nor node is on PATH.
+pub fn ensure_runtime(command: &str) -> Result<()> {
+    runtime_invocation(command).map(|_| ())
 }
 
 fn runtime_invocation(command: &str) -> Result<(&'static str, &'static [&'static str])> {

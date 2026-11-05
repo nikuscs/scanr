@@ -1035,4 +1035,7 @@ pub struct SlopReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diff: Option<DiffSummary>,
     pub findings: Vec<SlopFinding>,
+    /// Parts of the analysis that failed without failing the run (a crashed type-aware worker).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }

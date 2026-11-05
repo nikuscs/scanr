@@ -85,6 +85,9 @@ pub fn write_report<W: Write>(
             escape_markdown(&finding.action),
         )?;
     }
+    for warning in &report.warnings {
+        writeln!(writer, "\nWarning: {}", warning.replace(['\r', '\n'], " "))?;
+    }
     Ok(())
 }
 
@@ -258,6 +261,7 @@ mod tests {
             root: "/project".to_string(),
             diff: None,
             findings: vec![item],
+            warnings: Vec::new(),
         };
         let mut bytes = Vec::new();
         write_report(&report, SlopOutputFormat::Markdown, &mut bytes).unwrap();
@@ -276,6 +280,7 @@ mod tests {
             root: "/project".to_string(),
             diff: None,
             findings: Vec::new(),
+            warnings: Vec::new(),
         };
         let mut bytes = Vec::new();
         write_report(&report, SlopOutputFormat::Markdown, &mut bytes).unwrap();
@@ -292,6 +297,7 @@ mod tests {
             root: "/project".to_string(),
             diff: None,
             findings: Vec::new(),
+            warnings: Vec::new(),
         };
         let mut bytes = Vec::new();
         write_report(&report, SlopOutputFormat::Json, &mut bytes).unwrap();
@@ -317,6 +323,7 @@ mod tests {
                     added_lines: 4,
                 }),
                 findings: filter_and_sort_findings(input, &SlopFilter::default()),
+                warnings: Vec::new(),
             };
             let mut bytes = Vec::new();
             write_report(&report, format, &mut bytes).unwrap();

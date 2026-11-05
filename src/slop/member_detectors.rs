@@ -179,6 +179,24 @@ struct MembersRequest {
 #[derive(Debug, Deserialize)]
 pub struct MembersResponse {
     pub members: Vec<ResolvedMember>,
+    /// Checker queries the TypeScript compiler threw on; the worker skipped them.
+    #[serde(default)]
+    pub failures: Vec<WorkerFailure>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct WorkerFailure {
+    pub file: String,
+    pub line: u32,
+    pub message: String,
+}
+
+/// Type-aware member findings, or `None` when the worker failed and the syntactic
+/// member findings stand; `warnings` says which part failed.
+#[derive(Debug)]
+pub struct TypeAwareMembers {
+    pub findings: Option<Vec<SlopFinding>>,
+    pub warnings: Vec<String>,
 }
 
 /// One returned member with every reference the TypeScript checker resolved to it, and the
@@ -200,6 +218,10 @@ pub struct ResolvedMember {
     pub wired: Vec<ResolvedRef>,
     /// Where the factory's whole result is passed to a library-typed parameter.
     pub handed_off: Vec<ResolvedRef>,
+    /// A checker query that could have read this member failed, so its references are
+    /// incomplete and it is not reported.
+    #[serde(default)]
+    pub unresolved: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -212,11 +234,12 @@ pub struct ResolvedRef {
 }
 
 /// Resolves factory members with the TypeScript checker (bun or node) and classifies them.
+/// A worker that crashes or replies with garbage is a warning, not a failed run.
 pub fn detect_type_aware(
     root: &Path,
     tsconfigs: &[String],
     factories: &[String],
-) -> Result<Vec<SlopFinding>> {
+) -> Result<TypeAwareMembers> {
     let tsconfigs = if tsconfigs.is_empty() {
         discover_tsconfigs(root)
     } else {
@@ -232,15 +255,47 @@ pub fn detect_type_aware(
     if tsconfigs.is_empty() {
         bail!("--type-aware found no tsconfig.json under {}; pass --tsconfig", root.display());
     }
-    let response: MembersResponse = crate::worker::run_worker(
+    crate::worker::ensure_runtime("--type-aware")?;
+    let response = crate::worker::run_worker::<MembersResponse>(
         "members",
         &MembersRequest {
             root: root.to_string_lossy().into_owned(),
             tsconfigs,
             factories: factories.to_vec(),
         },
-    )?;
-    Ok(type_aware_findings(root, &response.members))
+    );
+    Ok(match response {
+        Ok(response) => TypeAwareMembers {
+            findings: Some(type_aware_findings(root, &response.members)),
+            warnings: failure_warnings(root, &response.failures),
+        },
+        Err(error) => TypeAwareMembers {
+            findings: None,
+            warnings: vec![format!(
+                "type-aware members skipped, the TypeScript worker failed; reporting name-based member findings instead: {error:#}"
+            )],
+        },
+    })
+}
+
+fn failure_warnings(root: &Path, failures: &[WorkerFailure]) -> Vec<String> {
+    failures
+        .iter()
+        .map(|failure| {
+            format!(
+                "type-aware members: the TypeScript checker failed at {}:{}, so members it could have read are not reported: {}",
+                relative(root, &failure.file),
+                failure.line,
+                failure.message
+            )
+        })
+        .collect()
+}
+
+fn relative(root: &Path, file: &str) -> String {
+    Path::new(file)
+        .strip_prefix(root)
+        .map_or_else(|_| file.to_string(), |path| path.to_string_lossy().replace('\\', "/"))
 }
 
 fn discover_tsconfigs(root: &Path) -> Vec<String> {
@@ -260,11 +315,7 @@ fn discover_tsconfigs(root: &Path) -> Vec<String> {
 }
 
 pub fn type_aware_findings(root: &Path, members: &[ResolvedMember]) -> Vec<SlopFinding> {
-    let relative = |file: &str| {
-        Path::new(file)
-            .strip_prefix(root)
-            .map_or_else(|_| file.to_string(), |path| path.to_string_lossy().replace('\\', "/"))
-    };
+    let relative = |file: &str| relative(root, file);
     let production = |refs: &[ResolvedRef]| {
         refs.iter()
             .filter(|reference| !reference.type_only && !is_test_path(&relative(&reference.file)))
@@ -276,6 +327,7 @@ pub fn type_aware_findings(root: &Path, members: &[ResolvedMember]) -> Vec<SlopF
         .filter(|member| {
             let file = relative(&member.file);
             Path::new(&member.file).starts_with(root)
+                && !member.unresolved
                 && !is_test_path(&file)
                 && member.handed_off.iter().all(|at| is_test_path(&relative(&at.file)))
         })
