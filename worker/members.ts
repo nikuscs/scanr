@@ -18,9 +18,22 @@ type Member = {
   refs: Ref[];
   wired: Ref[];
   handedOff: Ref[];
+  /** A checker query that could have read this member failed, so its references are incomplete. */
+  unresolved: boolean;
 };
 
-type Tracked = { member: Member; key: string; node: ts.Node; start: number; end: number; seen: Set<string> };
+/** A checker query the TypeScript compiler crashed on; the worker skips it and keeps going. */
+type Failure = { file: string; line: number; message: string };
+
+type Tracked = {
+  member: Member;
+  key: string;
+  node: ts.Node;
+  start: number;
+  end: number;
+  seen: Set<string>;
+  target?: string;
+};
 
 type FactoryObject = { node: ts.ObjectLiteralExpression; handedOff: Ref[]; members: Tracked[] };
 
@@ -38,17 +51,31 @@ export function members(req: MembersRequest) {
   const objects = new Map<string, FactoryObject>();
   const all: Tracked[] = [];
   const own = (key: string, entry: Tracked) => owners.set(key, [...(owners.get(key) ?? []), entry]);
+  const failures: Failure[] = [];
+  // The compiler can throw on code it type-checks lazily (a `Debug Failure` assertion on
+  // heavily generic calls). One such query must not lose the results of all the others.
+  const guard = <T>(node: ts.Node, query: () => T): T | undefined => {
+    try {
+      return query();
+    } catch (error) {
+      const sf = node.getSourceFile();
+      const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+      failures.push({ file: sf.fileName, line, message: String(error instanceof Error ? error.message : error).split("\n")[0] ?? "" });
+      return undefined;
+    }
+  };
+  const unresolved = new Set<string>();
 
   for (const program of programs) {
     const checker = program.getTypeChecker();
     for (const sf of ownFiles(program)) {
       if (!sf.fileName.startsWith(req.root)) continue;
-      for (const [factory, object] of factories(sf, checker, patterns)) {
+      for (const [factory, object] of guard(sf, () => factories(sf, checker, patterns)) ?? []) {
         const key = declarationKey(object);
         if (objects.has(key)) continue;
         const entry: FactoryObject = { node: object, handedOff: [], members: [] };
         objects.set(key, entry);
-        collectMembers(object, factory, "", sf, checker, entry, wrapped, names);
+        collectMembers(object, factory, "", sf, checker, entry, wrapped, names, guard);
         for (const member of entry.members) own(member.key, member);
         all.push(...entry.members);
       }
@@ -65,9 +92,11 @@ export function members(req: MembersRequest) {
       expression = unwrap(expression);
       if (ts.isAwaitExpression(expression)) expression = unwrap(expression.expression);
       if (!ts.isIdentifier(expression) && !ts.isCallExpression(expression) && !ts.isPropertyAccessExpression(expression) && !ts.isObjectLiteralExpression(expression)) return;
-      const declarations = checker.getTypeAtLocation(expression).getSymbol()?.declarations ?? [];
-      const object = declarations.map((declaration) => objects.get(declarationKey(declaration))).find(Boolean);
-      if (object) alias(object, expression, sf, checker, own);
+      guard(expression, () => {
+        const declarations = checker.getTypeAtLocation(expression).getSymbol()?.declarations ?? [];
+        const object = declarations.map((declaration) => objects.get(declarationKey(declaration))).find(Boolean);
+        if (object) alias(object, expression, sf, checker, own);
+      });
     };
     const visit = (node: ts.Node) => {
       if (ts.isCallExpression(node) || ts.isNewExpression(node)) (node.arguments ?? []).forEach(flow);
@@ -83,9 +112,14 @@ export function members(req: MembersRequest) {
   }
 
   for (const [sf, checker] of files) {
-    const record = (symbol: ts.Symbol | undefined, node: ts.Node, type: boolean) => {
+    const record = (lookup: () => ts.Symbol | undefined, node: ts.Node, name: string, type: boolean) => {
+      const failed = failures.length;
+      const symbol = guard(node, () => {
+        const found = lookup();
+        return found && found.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(found) : found;
+      });
+      if (failures.length > failed) unresolved.add(name);
       if (!symbol) return;
-      if (symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
       const position = node.getStart(sf);
       const ref = { file: sf.fileName, line: sf.getLineAndCharacterOfPosition(position).line + 1, type };
       for (const declaration of symbol.declarations ?? []) {
@@ -97,29 +131,35 @@ export function members(req: MembersRequest) {
     const visit = (node: ts.Node, type: boolean) => {
       type ||= ts.isTypeNode(node);
       if (ts.isShorthandPropertyAssignment(node) && names.has(node.name.text)) {
-        record(checker.getShorthandAssignmentValueSymbol(node), node.name, type);
+        record(() => checker.getShorthandAssignmentValueSymbol(node), node.name, node.name.text, type);
       } else if (ts.isIdentifier(node) && names.has(node.text) && !declares(node)) {
-        record(checker.getSymbolAtLocation(node), node, type);
+        record(() => checker.getSymbolAtLocation(node), node, node.text, type);
       } else if (ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)) {
-        record(checker.getSymbolAtLocation(node.argumentExpression), node.argumentExpression, type);
+        const argument = node.argumentExpression;
+        record(() => checker.getSymbolAtLocation(argument), argument, argument.text, type);
       } else if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent) && !node.dotDotDotToken) {
         const key = node.propertyName ?? node.name;
         if (ts.isIdentifier(key) || ts.isStringLiteralLike(key)) {
-          record(checker.getTypeAtLocation(node.parent).getProperty(key.text), key, type);
+          record(() => checker.getTypeAtLocation(node.parent).getProperty(key.text), key, key.text, type);
         }
       } else if (
         ts.isIndexedAccessTypeNode(node) &&
         ts.isLiteralTypeNode(node.indexType) &&
         ts.isStringLiteralLike(node.indexType.literal)
       ) {
-        record(checker.getTypeFromTypeNode(node.objectType).getProperty(node.indexType.literal.text), node.indexType, type);
+        const { objectType, indexType } = node;
+        const literal = indexType.literal as ts.StringLiteralLike;
+        record(() => checker.getTypeFromTypeNode(objectType).getProperty(literal.text), indexType, literal.text, type);
       }
       ts.forEachChild(node, (child) => visit(child, type));
     };
     visit(sf, false);
   }
 
-  return { members: all.map(({ member }) => member) };
+  for (const { member, target } of all) {
+    member.unresolved = unresolved.has(member.path.split(".").at(-1) ?? "") || (target !== undefined && unresolved.has(target));
+  }
+  return { members: all.map(({ member }) => member), failures };
 }
 
 /** Maps the factory's members onto the properties of the type its result flows into. */
@@ -221,6 +261,7 @@ function collectMembers(
   object: FactoryObject,
   wrapped: Map<string, Tracked[]>,
   names: Set<string>,
+  guard: <T>(node: ts.Node, query: () => T) => T | undefined,
 ) {
   let callable = false;
   for (const property of literal.properties) {
@@ -231,14 +272,14 @@ function collectMembers(
     const position = object.members.length;
     const value = ts.isPropertyAssignment(property) ? unwrap(property.initializer) : undefined;
     const keep = value && ts.isObjectLiteralExpression(value)
-      ? collectMembers(value, factory, `${path}.`, sf, checker, object, wrapped, names)
-      : callableType(checker.getTypeAtLocation(property.name), checker);
+      ? collectMembers(value, factory, `${path}.`, sf, checker, object, wrapped, names, guard)
+      : guard(property, () => callableType(checker.getTypeAtLocation(name), checker));
     if (!keep) continue;
     callable = true;
     const start = property.getStart(sf);
     const begin = sf.getLineAndCharacterOfPosition(start);
     const finish = sf.getLineAndCharacterOfPosition(property.end);
-    const target = wrappedSymbol(property, checker);
+    const target = guard(property, () => wrappedSymbol(property, checker));
     const entry: Tracked = {
       member: {
         file: sf.fileName,
@@ -254,12 +295,14 @@ function collectMembers(
         refs: [],
         wired: [],
         handedOff: object.handedOff,
+        unresolved: false,
       },
       key: declarationKey(property),
       node: property,
       start,
       end: property.end,
       seen: new Set(),
+      target: target?.name,
     };
     object.members.splice(position, 0, entry);
     names.add(name.text);

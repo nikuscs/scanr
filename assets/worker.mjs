@@ -246422,18 +246422,31 @@ function members(req) {
   const objects = new Map;
   const all = [];
   const own = (key, entry) => owners.set(key, [...owners.get(key) ?? [], entry]);
+  const failures = [];
+  const guard = (node, query) => {
+    try {
+      return query();
+    } catch (error) {
+      const sf = node.getSourceFile();
+      const line = sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
+      failures.push({ file: sf.fileName, line, message: String(error instanceof Error ? error.message : error).split(`
+`)[0] ?? "" });
+      return;
+    }
+  };
+  const unresolved = new Set;
   for (const program of programs) {
     const checker = program.getTypeChecker();
     for (const sf of ownFiles(program)) {
       if (!sf.fileName.startsWith(req.root))
         continue;
-      for (const [factory, object] of factories(sf, checker, patterns)) {
+      for (const [factory, object] of guard(sf, () => factories(sf, checker, patterns)) ?? []) {
         const key = declarationKey(object);
         if (objects.has(key))
           continue;
         const entry = { node: object, handedOff: [], members: [] };
         objects.set(key, entry);
-        collectMembers(object, factory, "", sf, checker, entry, wrapped, names);
+        collectMembers(object, factory, "", sf, checker, entry, wrapped, names, guard);
         for (const member of entry.members)
           own(member.key, member);
         all.push(...entry.members);
@@ -246448,10 +246461,12 @@ function members(req) {
         expression = unwrap(expression.expression);
       if (!import_ts_morph.ts.isIdentifier(expression) && !import_ts_morph.ts.isCallExpression(expression) && !import_ts_morph.ts.isPropertyAccessExpression(expression) && !import_ts_morph.ts.isObjectLiteralExpression(expression))
         return;
-      const declarations = checker.getTypeAtLocation(expression).getSymbol()?.declarations ?? [];
-      const object = declarations.map((declaration) => objects.get(declarationKey(declaration))).find(Boolean);
-      if (object)
-        alias(object, expression, sf, checker, own);
+      guard(expression, () => {
+        const declarations = checker.getTypeAtLocation(expression).getSymbol()?.declarations ?? [];
+        const object = declarations.map((declaration) => objects.get(declarationKey(declaration))).find(Boolean);
+        if (object)
+          alias(object, expression, sf, checker, own);
+      });
     };
     const visit = (node) => {
       if (import_ts_morph.ts.isCallExpression(node) || import_ts_morph.ts.isNewExpression(node))
@@ -246473,11 +246488,16 @@ function members(req) {
     visit(sf);
   }
   for (const [sf, checker] of files) {
-    const record = (symbol, node, type) => {
+    const record = (lookup, node, name, type) => {
+      const failed = failures.length;
+      const symbol = guard(node, () => {
+        const found = lookup();
+        return found && found.flags & import_ts_morph.ts.SymbolFlags.Alias ? checker.getAliasedSymbol(found) : found;
+      });
+      if (failures.length > failed)
+        unresolved.add(name);
       if (!symbol)
         return;
-      if (symbol.flags & import_ts_morph.ts.SymbolFlags.Alias)
-        symbol = checker.getAliasedSymbol(symbol);
       const position = node.getStart(sf);
       const ref = { file: sf.fileName, line: sf.getLineAndCharacterOfPosition(position).line + 1, type };
       for (const declaration of symbol.declarations ?? []) {
@@ -246491,24 +246511,30 @@ function members(req) {
     const visit = (node, type) => {
       type ||= import_ts_morph.ts.isTypeNode(node);
       if (import_ts_morph.ts.isShorthandPropertyAssignment(node) && names.has(node.name.text)) {
-        record(checker.getShorthandAssignmentValueSymbol(node), node.name, type);
+        record(() => checker.getShorthandAssignmentValueSymbol(node), node.name, node.name.text, type);
       } else if (import_ts_morph.ts.isIdentifier(node) && names.has(node.text) && !declares(node)) {
-        record(checker.getSymbolAtLocation(node), node, type);
+        record(() => checker.getSymbolAtLocation(node), node, node.text, type);
       } else if (import_ts_morph.ts.isElementAccessExpression(node) && import_ts_morph.ts.isStringLiteralLike(node.argumentExpression)) {
-        record(checker.getSymbolAtLocation(node.argumentExpression), node.argumentExpression, type);
+        const argument = node.argumentExpression;
+        record(() => checker.getSymbolAtLocation(argument), argument, argument.text, type);
       } else if (import_ts_morph.ts.isBindingElement(node) && import_ts_morph.ts.isObjectBindingPattern(node.parent) && !node.dotDotDotToken) {
         const key = node.propertyName ?? node.name;
         if (import_ts_morph.ts.isIdentifier(key) || import_ts_morph.ts.isStringLiteralLike(key)) {
-          record(checker.getTypeAtLocation(node.parent).getProperty(key.text), key, type);
+          record(() => checker.getTypeAtLocation(node.parent).getProperty(key.text), key, key.text, type);
         }
       } else if (import_ts_morph.ts.isIndexedAccessTypeNode(node) && import_ts_morph.ts.isLiteralTypeNode(node.indexType) && import_ts_morph.ts.isStringLiteralLike(node.indexType.literal)) {
-        record(checker.getTypeFromTypeNode(node.objectType).getProperty(node.indexType.literal.text), node.indexType, type);
+        const { objectType, indexType } = node;
+        const literal = indexType.literal;
+        record(() => checker.getTypeFromTypeNode(objectType).getProperty(literal.text), indexType, literal.text, type);
       }
       import_ts_morph.ts.forEachChild(node, (child) => visit(child, type));
     };
     visit(sf, false);
   }
-  return { members: all.map(({ member }) => member) };
+  for (const { member, target } of all) {
+    member.unresolved = unresolved.has(member.path.split(".").at(-1) ?? "") || target !== undefined && unresolved.has(target);
+  }
+  return { members: all.map(({ member }) => member), failures };
 }
 function alias(object, expression, sf, checker, own) {
   const contextual = checker.getContextualType(expression);
@@ -246596,7 +246622,7 @@ function returnedObject(body) {
   });
   return objects.length === 1 ? objects[0] : undefined;
 }
-function collectMembers(literal, factory, prefix, sf, checker, object, wrapped, names) {
+function collectMembers(literal, factory, prefix, sf, checker, object, wrapped, names, guard) {
   let callable = false;
   for (const property of literal.properties) {
     if (import_ts_morph.ts.isSpreadAssignment(property) || !property.name)
@@ -246607,14 +246633,14 @@ function collectMembers(literal, factory, prefix, sf, checker, object, wrapped, 
     const path = `${prefix}${name.text}`;
     const position = object.members.length;
     const value = import_ts_morph.ts.isPropertyAssignment(property) ? unwrap(property.initializer) : undefined;
-    const keep = value && import_ts_morph.ts.isObjectLiteralExpression(value) ? collectMembers(value, factory, `${path}.`, sf, checker, object, wrapped, names) : callableType(checker.getTypeAtLocation(property.name), checker);
+    const keep = value && import_ts_morph.ts.isObjectLiteralExpression(value) ? collectMembers(value, factory, `${path}.`, sf, checker, object, wrapped, names, guard) : guard(property, () => callableType(checker.getTypeAtLocation(name), checker));
     if (!keep)
       continue;
     callable = true;
     const start = property.getStart(sf);
     const begin = sf.getLineAndCharacterOfPosition(start);
     const finish = sf.getLineAndCharacterOfPosition(property.end);
-    const target = wrappedSymbol(property, checker);
+    const target = guard(property, () => wrappedSymbol(property, checker));
     const entry = {
       member: {
         file: sf.fileName,
@@ -246629,13 +246655,15 @@ function collectMembers(literal, factory, prefix, sf, checker, object, wrapped, 
         wraps: target !== undefined,
         refs: [],
         wired: [],
-        handedOff: object.handedOff
+        handedOff: object.handedOff,
+        unresolved: false
       },
       key: declarationKey(property),
       node: property,
       start,
       end: property.end,
-      seen: new Set
+      seen: new Set,
+      target: target?.name
     };
     object.members.splice(position, 0, entry);
     names.add(name.text);
@@ -246773,10 +246801,14 @@ function rename(req) {
 }
 
 // index.ts
-var { command, ...req } = JSON.parse(process.env.SCANR_WORKER_REQUEST ?? "");
-if (command === "rename")
-  reply(rename(req));
-else if (command === "members")
-  reply(members(req));
-else
-  fail(`unknown worker command "${command}"`);
+try {
+  const { command, ...req } = JSON.parse(process.env.SCANR_WORKER_REQUEST ?? "");
+  if (command === "rename")
+    reply(rename(req));
+  else if (command === "members")
+    reply(members(req));
+  else
+    fail(`unknown worker command "${command}"`);
+} catch (error) {
+  fail(error instanceof Error ? error.message : String(error));
+}
