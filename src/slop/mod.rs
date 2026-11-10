@@ -390,16 +390,19 @@ fn resolve_imports(root: &Path, aliases: &AliasConfig, project: &mut ProjectFact
             .get(importer)
             .and_then(|directory| configs.get(directory))
             .unwrap_or(aliases);
-        if !facts.is_test && !facts.is_generated {
-            for source in &facts.module_sources {
-                if let Resolution::Resolved(path) =
-                    resolve_module(root, aliases, importer, source, &file_paths)
-                    && path != *importer
-                {
-                    project.module_importers.entry(path).or_default().insert(importer.clone());
-                }
+        let mut modules = BTreeMap::new();
+        for source in &facts.module_sources {
+            let module = resolve_module(root, aliases, importer, source, &file_paths);
+            if !facts.is_test
+                && !facts.is_generated
+                && let Resolution::Resolved(path) = &module
+                && path != importer
+            {
+                project.module_importers.entry(path.clone()).or_default().insert(importer.clone());
             }
+            modules.insert(source.clone(), module);
         }
+        project.module_resolutions.insert(importer.clone(), modules);
         for import in &facts.imports {
             let key = ImportKey {
                 importer: importer.clone(),

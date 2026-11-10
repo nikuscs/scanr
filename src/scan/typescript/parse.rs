@@ -9,6 +9,7 @@ use oxc::span::SourceType;
 
 use super::extract;
 use crate::scan::health::{HealthAstMetrics, analyze_program};
+use crate::scan::outline::FileOutline;
 use crate::scan::types::{FileIndex, FunctionKindsFilter};
 use crate::similarity::function_extractor::{FunctionDefinition, extract_functions_from_program};
 use crate::similarity::type_extractor::{TypeDefinition, TypeExtractor, TypeLiteralDefinition};
@@ -40,6 +41,20 @@ pub fn process_file_with_similarity(
     Ok((index, similarity))
 }
 
+/// Outline of source text that is not on disk, such as a file at a Git revision.
+/// `path` only selects the language.
+pub fn outline_source(path: &Path, source: &str) -> Result<FileOutline> {
+    let source_type = SourceType::from_path(path)
+        .map_err(|_| anyhow::anyhow!("unsupported file type: {}", path.display()))?;
+    let allocator = Allocator::default();
+    let parsed = Parser::new(&allocator, source, source_type).parse();
+    if parsed.panicked {
+        return Ok(FileOutline::default());
+    }
+    let lines = crate::scan::types::LineIndex::new(source);
+    Ok(super::outline::build_outline(&parsed.program, source, &lines).outline)
+}
+
 fn process_file_inner(
     path: &Path,
     root: &Path,
@@ -69,6 +84,8 @@ fn process_file_inner(
             bindings: Vec::new(),
             types: Vec::new(),
             exports: Vec::new(),
+            outline: FileOutline::default(),
+            line_count: source.lines().count() as u32,
             violations: Vec::new(),
             parse_errors,
             slop: FileFacts {
@@ -92,8 +109,7 @@ fn process_file_inner(
     let semantic =
         SemanticBuilder::new().with_build_nodes(true).build(&parser_ret.program).semantic;
     let result = extract::extract_file(&parser_ret.program, &semantic, &source, filter);
-    let exported_names =
-        result.exports.iter().map(|export| export.name.clone()).collect::<BTreeSet<_>>();
+    let exported_names = result.exported_locals.iter().cloned().collect::<BTreeSet<_>>();
     let slop = collect_facts(
         &parser_ret.program,
         &semantic,
@@ -123,6 +139,8 @@ fn process_file_inner(
         bindings: result.bindings,
         types: result.types,
         exports: result.exports,
+        outline: result.outline,
+        line_count: result.line_count,
         violations: Vec::new(),
         parse_errors,
         slop,

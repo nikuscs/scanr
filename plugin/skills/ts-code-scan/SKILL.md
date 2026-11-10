@@ -1,6 +1,6 @@
 ---
 name: ts-code-scan
-description: "xray overview, constants, types, functions, tree, slop, refs, rename, census, dupes, and search for offline TypeScript and JavaScript"
+description: "xray overview, file outline, role drift, dependencies, outline diff, constants, types, functions, tree, slop, refs, rename, census, dupes, and search for offline TypeScript and JavaScript"
 allowed-tools: Bash, Read
 ---
 
@@ -24,9 +24,50 @@ scanr xray --root <path>
 
 One Markdown page: shape, health hotspots, slop counts, and duplicate groups. `--top <n>` limits rows per section; `--json` for structured output. Return the output as printed, then drill in with `tree --health`, `slop`, or `dupes`.
 
+## See how files are organized
+
+When the question is what lives inside each file, how declarations nest, or whether a folder follows its structure:
+
+```bash
+scanr scan --mode outline --root <path>          # JSON for you
+scanr tree --outline --root <path> --path <dir>  # tree for a human
+```
+
+Each file lists its `symbols` as a tree: `{name, kind, line, endLine}` plus `via` (the callee that produced it, such as `Effect.fn`), `extends`, `exported`, `exportedAs`, and `children`. `reexports` rows carry `from` and either `names` or `all`. A declaration inside an anonymous callback belongs to the nearest named declaration around it, so `record` sits under `make` in `const make = Effect.gen(function* () { const record = … })`.
+
+A variable is a `function` only when assigned an arrow, a function expression, or a recognized wrapper (`Effect.fn`, `Effect.fnUntraced`, `memo`, `forwardRef`, `useCallback`, `cache`, `debounce`, `throttle`, `memoize`, `once`, `observer`). Any other call result is a `const` with `via`; read `via` to judge it.
+
+Default output is declarations and functions. `--deep` adds locals, properties, type and enum members, and imports. `--signatures` adds each callable's parameters and return type. `--exported` keeps only exported symbols and re-exports, the public surface. In the tree, indentation means "lives inside" and `()` marks a function; return it as printed.
+
+## Check a folder follows its architecture
+
+```bash
+scanr roles --root <path>
+```
+
+Groups files by name suffix (`*.layer.ts` is `.layer`) and lists, per role, what its files usually have and the files that differ: `missing` a usual trait, or carrying an `unusual` one such as `imports .fake (1 of 18)`. Read each odd one out as a question to check, not a verdict. `--min-files`, `--usual`, and `--unusual` tune the thresholds; `--json` for structured output.
+
+## What a file depends on, and what depends on it
+
+Before moving, splitting, or deleting a file:
+
+```bash
+scanr deps --root <path> --path <file-or-dir>
+```
+
+Lists resolved project imports (`(type)` when type-only), packages, unresolved relative imports, and `imported by`. Importers come from the whole root, tests included. `--json` for structured output.
+
+## Review a refactor by its structure
+
+```bash
+scanr diff --base <ref> --root <path>
+```
+
+Compares the working tree's outlines with `<ref>`: `+` added, `-` removed, `>` moved (with the destination file), `~` renamed or changed (signature, exported, kind, producer). Renames are claimed only with evidence, so a rename it cannot prove shows as one removal and one addition. Run it after a refactor to confirm nothing was dropped or left behind. `--deep` includes locals; `--json` for structured output.
+
 ## Get all constants
 
-Use `constants`. Each row is `{file, name, kind}` where `kind` is `primitive` or `arrow` (`const Foo = () => {}` is `arrow`).
+Use `constants`. Each row is `{file, name, kind}` where `kind` is `primitive` or `arrow` (`const Foo = () => {}` is `arrow`). Names are dotted paths through the enclosing declarations (`make.db`), so a name without a dot is top-level. `let` and `var` declarations are under `variables`.
 
 Counts: `constants.length`, split by `kind`. A “quick list” is the `name`s, or `UPPER_SNAKE` names if they want real constants not hook locals.
 
@@ -34,16 +75,17 @@ Counts: `constants.length`, split by `kind`. A “quick list” is the `name`s, 
 
 Use `types`. Each row is `{file, name, kind}` where `kind` is `interface` or `type`.
 
-## Get all functions / components / hooks / classes / enums / exports
+## Get all functions / components / hooks / classes / enums / namespaces / exports
 
 Same inventory JSON:
 
-- `functions` — named functions (dotted if nested)
+- `functions` — named functions, methods included (dotted path: `make.record`, `Service.run`)
 - `components` — React components (`.tsx` + JSX + Uppercase)
 - `hooks` — declarations named `use` + uppercase, not `useState` *calls*
 - `classes`
 - `enums`
-- `exports`
+- `namespaces`
+- `exports` — each public name once; re-exported names carry `from` (`*` for `export * from`)
 
 ## Get a tree
 
@@ -51,7 +93,7 @@ Same inventory JSON:
 scanr tree --root <path>
 ```
 
-`--path <subdir>` to focus. `--functions` for function markers. `--function-details` when they want nested components/functions explained. `--health --only-findings --top 20` for hotspots. Return the command output as printed.
+`--path <subdir>` to focus. `--outline` for each file's nested declarations. `--functions` for function markers. `--function-details` when they want nested components/functions explained. `--health --only-findings --top 20` for hotspots. Return the command output as printed.
 
 ## Usages of a name
 

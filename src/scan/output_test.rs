@@ -1,7 +1,7 @@
 use super::*;
 use crate::scan::types::{
-    BindingInfo, BindingKind, ClassInfo, ExportInfo, FileIndex, FunctionContent, FunctionInfo,
-    FunctionKind, ScanResult, Stats, TypeDeclKind, TypeInfo, Violation,
+    BindingInfo, BindingKind, ExportInfo, FileIndex, FunctionContent, FunctionInfo, FunctionKind,
+    ScanResult, Stats, TypeDeclKind, TypeInfo, Violation,
 };
 use crate::slop::types::FileFacts;
 
@@ -63,6 +63,8 @@ fn scan_result_example() -> ScanResult {
         }],
         types: vec![],
         exports: vec![],
+        outline: crate::scan::outline::FileOutline::default(),
+        line_count: 0,
         violations: vec![],
         parse_errors: 0,
         slop: FileFacts::default(),
@@ -87,6 +89,8 @@ fn scan_result_example() -> ScanResult {
         bindings: vec![],
         types: vec![],
         exports: vec![],
+        outline: crate::scan::outline::FileOutline::default(),
+        line_count: 0,
         violations: vec![],
         parse_errors: 0,
         slop: FileFacts::default(),
@@ -163,6 +167,8 @@ fn folders_mode_uses_dot_names() {
         bindings: vec![],
         types: vec![],
         exports: vec![],
+        outline: crate::scan::outline::FileOutline::default(),
+        line_count: 0,
         violations: vec![],
         parse_errors: 0,
         slop: FileFacts::default(),
@@ -232,6 +238,8 @@ fn dot_names_for_nested_methods() {
         bindings: vec![],
         types: vec![],
         exports: vec![],
+        outline: crate::scan::outline::FileOutline::default(),
+        line_count: 0,
         violations: vec![],
         parse_errors: 0,
         slop: FileFacts::default(),
@@ -302,6 +310,8 @@ fn dot_names_picks_nearest_parent() {
         bindings: vec![],
         types: vec![],
         exports: vec![],
+        outline: crate::scan::outline::FileOutline::default(),
+        line_count: 0,
         violations: vec![],
         parse_errors: 0,
         slop: FileFacts::default(),
@@ -365,6 +375,8 @@ fn write_result_emits_valid_json_all_modes() {
         }],
         types: vec![],
         exports: vec![],
+        outline: crate::scan::outline::FileOutline::default(),
+        line_count: 0,
         violations: vec![],
         parse_errors: 0,
         slop: FileFacts::default(),
@@ -384,7 +396,7 @@ fn write_result_emits_valid_json_all_modes() {
         OutputMode::Inventory,
     ] {
         let mut buf = Vec::new();
-        write_result_with_lines(&r, mode, false, &mut buf).unwrap();
+        write_result(&r, mode, OutputOptions::default(), &mut buf).unwrap();
         let v: serde_json::Value = serde_json::from_slice(&buf).unwrap();
         assert!(v.get("ver").is_some());
     }
@@ -400,12 +412,12 @@ fn compact_and_verbose_outputs_include_violations() {
     });
 
     let mut compact = Vec::new();
-    write_result_with_lines(&result, OutputMode::Compact, false, &mut compact).unwrap();
+    write_result(&result, OutputMode::Compact, OutputOptions::default(), &mut compact).unwrap();
     let compact: serde_json::Value = serde_json::from_slice(&compact).unwrap();
     assert_eq!(compact["viol"][0][1], "demo");
 
     let mut verbose = Vec::new();
-    write_result_with_lines(&result, OutputMode::Verbose, false, &mut verbose).unwrap();
+    write_result(&result, OutputMode::Verbose, OutputOptions::default(), &mut verbose).unwrap();
     let verbose: serde_json::Value = serde_json::from_slice(&verbose).unwrap();
     assert_eq!(verbose["violations"][0]["rule"], "demo");
 }
@@ -432,6 +444,8 @@ fn verbose_output_includes_exports_and_folder_none_parent_path() {
         bindings: vec![],
         types: vec![],
         exports: vec![ExportInfo { name: "default".into(), kind_code: 2 }],
+        outline: crate::scan::outline::FileOutline::default(),
+        line_count: 0,
         violations: vec![],
         parse_errors: 0,
         slop: FileFacts::default(),
@@ -445,7 +459,7 @@ fn verbose_output_includes_exports_and_folder_none_parent_path() {
     };
 
     let mut verbose = Vec::new();
-    write_result_with_lines(&r, OutputMode::Verbose, false, &mut verbose).unwrap();
+    write_result(&r, OutputMode::Verbose, OutputOptions::default(), &mut verbose).unwrap();
     let v: serde_json::Value = serde_json::from_slice(&verbose).unwrap();
     assert_eq!(v["exports"][0]["name"], "default");
     assert_eq!(v["exports"][0]["kindCode"], 2);
@@ -473,13 +487,13 @@ fn compact_and_verbose_outputs_include_types() {
     });
 
     let mut compact = Vec::new();
-    write_result_with_lines(&result, OutputMode::Compact, false, &mut compact).unwrap();
+    write_result(&result, OutputMode::Compact, OutputOptions::default(), &mut compact).unwrap();
     let compact: serde_json::Value = serde_json::from_slice(&compact).unwrap();
     assert_eq!(compact["t"][0], serde_json::json!(["dir/a.ts", 4, 8, "Range", 1, "interface"]));
     assert_eq!(compact["t"][1], serde_json::json!(["dir/a.ts", 9, 6, "Local", 0, "type"]));
 
     let mut verbose = Vec::new();
-    write_result_with_lines(&result, OutputMode::Verbose, false, &mut verbose).unwrap();
+    write_result(&result, OutputMode::Verbose, OutputOptions::default(), &mut verbose).unwrap();
     let verbose: serde_json::Value = serde_json::from_slice(&verbose).unwrap();
     assert_eq!(verbose["types"][0]["name"], "Range");
     assert_eq!(verbose["types"][0]["kind"], "interface");
@@ -505,123 +519,58 @@ fn compact_schema_describes_positional_arrays() {
     assert_eq!(schema["export_kind_codes"]["1"], "named");
 }
 
-fn inventory_scan_result() -> ScanResult {
-    let fi = FileIndex {
-        path: "Card.tsx".into(),
-        functions: vec![
-            FunctionInfo {
-                name: Some("Card".into()),
-                parent: None,
-                captures: Vec::new(),
-                low_value_reason: None,
-                kind: FunctionKind::Arrow,
-                exported: true,
-                is_async: false,
-                is_generator: false,
-                content: FunctionContent::Jsx,
-                line: 10,
-                col: 1,
-                line_end: 20,
-            },
-            FunctionInfo {
-                name: Some("useCard".into()),
-                parent: None,
-                captures: Vec::new(),
-                low_value_reason: None,
-                kind: FunctionKind::Declaration,
-                exported: false,
-                is_async: false,
-                is_generator: false,
-                content: FunctionContent::Plain,
-                line: 22,
-                col: 1,
-                line_end: 24,
-            },
-        ],
-        classes: vec![ClassInfo { name: "Svc".into(), exported: true, line: 40, line_end: 50 }],
-        bindings: vec![
-            BindingInfo {
-                name: "MAX".into(),
-                kind: BindingKind::Const,
-                exported: true,
-                refs: 2,
-                line: 3,
-                col: 1,
-            },
-            BindingInfo {
-                name: "Card".into(),
-                kind: BindingKind::Const,
-                exported: true,
-                refs: 1,
-                line: 10,
-                col: 1,
-            },
-            BindingInfo {
-                name: "Kind".into(),
-                kind: BindingKind::Enum,
-                exported: true,
-                refs: 1,
-                line: 30,
-                col: 1,
-            },
-        ],
-        types: vec![TypeInfo {
-            name: "Props".into(),
-            kind: TypeDeclKind::Interface,
-            exported: true,
-            line: 1,
-            col: 1,
-        }],
-        exports: vec![ExportInfo { name: "Card".into(), kind_code: 1 }],
-        violations: vec![],
-        parse_errors: 0,
-        slop: FileFacts::default(),
+#[test]
+fn outline_mode_hides_detail_unless_deep() {
+    use crate::scan::outline::{FileOutline, Symbol, SymbolKind};
+
+    let mut local = Symbol::new("local".into(), SymbolKind::Const, 3, 3);
+    local.detail = true;
+    let mut run = Symbol::new("run".into(), SymbolKind::Function, 2, 4);
+    run.exported = true;
+    run.children = vec![local];
+
+    let mut result = scan_result_example();
+    result.file_indices.truncate(1);
+    result.file_indices[0].line_count = 5;
+    result.file_indices[0].outline =
+        FileOutline { symbols: vec![run], reexports: Vec::new(), imports: vec!["./dep".into()] };
+    let path = result.file_indices[0].path.clone();
+
+    let render = |deep: bool| -> serde_json::Value {
+        let mut buf = Vec::new();
+        let options = OutputOptions {
+            lines: false,
+            view: crate::scan::outline::OutlineView { deep, ..Default::default() },
+        };
+        write_result(&result, OutputMode::Outline, options, &mut buf).unwrap();
+        serde_json::from_slice(&buf).unwrap()
     };
-    ScanResult {
-        ver: 1,
-        root: ".".into(),
-        stats: Stats { files: 1, parsed: 1, skipped: 0, errors: 0 },
-        file_indices: vec![fi],
-        errors: vec![],
-    }
+
+    let structure = render(false);
+    assert_eq!(
+        structure["files"],
+        serde_json::json!([{
+            "file": path, "lines": 5,
+            "symbols": [{ "name": "run", "kind": "function", "exported": true, "line": 2, "endLine": 4 }]
+        }])
+    );
+
+    let deep = render(true);
+    assert_eq!(deep["files"][0]["imports"], serde_json::json!(["./dep"]));
+    assert_eq!(deep["files"][0]["symbols"][0]["children"][0]["name"], "local");
 }
 
 #[test]
-fn inventory_lists_names_without_lines_by_default() {
+fn outline_and_inventory_schemas_describe_their_fields() {
     let mut buf = Vec::new();
-    write_result_with_lines(&inventory_scan_result(), OutputMode::Inventory, false, &mut buf)
-        .unwrap();
-    let v: serde_json::Value = serde_json::from_slice(&buf).unwrap();
-    assert_eq!(
-        v["functions"],
-        serde_json::json!([{"file": "Card.tsx", "name": "Card"}, {"file": "Card.tsx", "name": "useCard"}])
-    );
-    assert_eq!(
-        v["constants"],
-        serde_json::json!([
-            {"file": "Card.tsx", "name": "Card", "kind": "arrow"},
-            {"file": "Card.tsx", "name": "MAX", "kind": "primitive"}
-        ])
-    );
-    assert_eq!(
-        v["types"],
-        serde_json::json!([{"file": "Card.tsx", "name": "Props", "kind": "interface"}])
-    );
-    assert_eq!(v["components"], serde_json::json!([{"file": "Card.tsx", "name": "Card"}]));
-    assert_eq!(v["hooks"], serde_json::json!([{"file": "Card.tsx", "name": "useCard"}]));
-    assert_eq!(v["classes"], serde_json::json!([{"file": "Card.tsx", "name": "Svc"}]));
-    assert_eq!(v["enums"], serde_json::json!([{"file": "Card.tsx", "name": "Kind"}]));
-    assert_eq!(v["exports"], serde_json::json!([{"file": "Card.tsx", "name": "Card"}]));
-    assert!(v["functions"][0].get("line").is_none());
-}
+    write_schema(OutputMode::Outline, &mut buf).unwrap();
+    let schema: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+    assert_eq!(schema["mode"], "outline");
+    assert_eq!(schema["fields"]["files"][2], "symbols");
 
-#[test]
-fn inventory_includes_lines_when_requested() {
     let mut buf = Vec::new();
-    write_result_with_lines(&inventory_scan_result(), OutputMode::Inventory, true, &mut buf)
-        .unwrap();
-    let v: serde_json::Value = serde_json::from_slice(&buf).unwrap();
-    assert_eq!(v["constants"][1]["name"], "MAX");
-    assert_eq!(v["constants"][1]["line"], 3);
-    assert_eq!(v["components"][0]["line"], 10);
+    write_schema(OutputMode::Inventory, &mut buf).unwrap();
+    let schema: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+    assert_eq!(schema["fields"]["exports"], serde_json::json!(["file", "name", "from?"]));
+    assert_eq!(schema["variable_kinds"], serde_json::json!(["let", "var"]));
 }

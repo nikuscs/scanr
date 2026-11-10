@@ -8,6 +8,10 @@ A fast, deterministic static-analysis and search CLI for TypeScript and JavaScri
 ## Features
 
 - **Structural analysis** — extract functions, captures, bindings, references, exports, and rule violations with oxc
+- **File outline** — every file's nested declarations: what lives inside what, wrapped functions, re-exports
+- **Role drift** — files grouped by name suffix, with the ones that break their group's pattern
+- **Dependency graph** — each file's imports resolved to project files, and its importers
+- **Outline diff** — declarations added, removed, renamed, moved, or changed since a Git base
 - **Name inventory and refs** — folder-level name lists, then declaration usage sites
 - **Type-accurate rename** — rewrite a symbol and its TypeScript-resolved usages (requires bun or node)
 - **Content and path search** — gitignore-aware, parallel grep with stable JSON output
@@ -42,12 +46,17 @@ cargo build --release
 
 ```bash
 scanr search "useState" --root . --json
+scanr scan --root . --mode outline
 scanr scan --root . --mode inventory
 scanr refs Card --root .
 scanr rename Card ProfileCard --root .
 scanr dupes --root . --types
 scanr slop --root .
 scanr tree --root .
+scanr tree --root . --outline
+scanr roles --root .
+scanr deps --root . --path src/commands
+scanr diff --base main
 scanr xray --root .
 ```
 
@@ -87,6 +96,9 @@ Search flags:
 Extract TypeScript and JavaScript structure. For agents, start with a name inventory, then use compact/verbose when you need lines, captures, or rules:
 
 ```bash
+scanr scan --mode outline
+scanr scan --mode outline --deep
+scanr scan --mode outline --signatures --exported
 scanr scan --mode inventory
 scanr scan --mode inventory --lines
 scanr scan
@@ -97,14 +109,25 @@ scanr scan --mode folders
 scanr scan --rules hoistable_nested_function
 ```
 
-`--mode inventory` emits `{functions,constants,types,components,hooks,classes,enums,exports}` as `{file,name}` rows (add `--lines` for `line`). Constant `kind` is `primitive` or `arrow` (`const Foo = () => {}` is `arrow` and also appears under `functions`). Types are `interface` or `type`. `components` / `hooks` are the React role subset of functions (`.tsx` + JSX + Uppercase for components; `useX` for hooks).
+`--mode outline` emits `{files:[{file,lines,symbols,reexports}]}`: each file's declarations as a tree. A symbol is `{name,kind,line,endLine}` plus `via` (the callee that produced it, such as `Effect.fn` or `new Map`), `extends`, `exported`, `exportedAs` (public names that differ from `name`, such as `default`), and `children`. Kinds are `function`, `const`, `let`, `var`, `class`, `method`, `getter`, `setter`, `constructor`, `property`, `interface`, `type`, `enum`, `enumMember`, and `namespace`. `reexports` rows are `{from,names}`, `{from,all}` for `export *`, and `{from,all,namespace}` for `export * as`.
+
+Nesting follows ownership. Anonymous callbacks are transparent, so a declaration inside one belongs to the nearest named declaration around it: `record` sits under `make` in `const make = Effect.gen(function* () { const record = … })`. Members come from classes, from object literals assigned directly to a declaration, and from interfaces, type literals, and enums. Overload signatures collapse into one function.
+
+A variable is a `function` when it is assigned an arrow or function expression, or the result of a recognized wrapper whose first argument is one: `Effect.fn`, `Effect.fnUntraced`, `cache`, `debounce`, `forwardRef`, `memo`, `memoize`, `observer`, `once`, `throttle`, and `useCallback` (a bare name also matches as the last segment, so `React.memo` counts). Syntax cannot tell `memo(fn)` from `items.map(fn)`, so every other call result stays a variable and carries its callee in `via`.
+
+By default the outline holds declarations and functions. `--deep` adds locals inside function bodies, properties, interface, type, and enum members, and each file's `imports`. `--signatures` adds `signature` to callables: the type parameters, parameters, and return type as written, on one line (`(id: string): User`). `--exported` keeps only each file's public surface: exported symbols and re-exports.
+
+`--mode inventory` flattens the outline into `{functions,constants,variables,types,components,hooks,classes,enums,namespaces,exports}` as `{file,name}` rows (add `--lines` for `line`). Names are dotted paths through the enclosing declarations, such as `make.record` or `Service.run`. Constant `kind` is `primitive` or `arrow` (`const Foo = () => {}` is `arrow` and also appears under `functions`); `variables` are `let` or `var`. Types are `interface` or `type`. `components` / `hooks` are the React role subset of functions (`.tsx` + JSX + Uppercase for components; `useX` for hooks). `exports` lists each public name once, and re-exported names carry `from` (`*` for `export * from`).
 
 Flags:
 
 - `--root <path>` — project root
-- `--mode compact|verbose|files|folders|inventory` — output shape
+- `--mode compact|verbose|files|folders|inventory|outline` — output shape
 - `--lines` — include source line numbers in `--mode inventory`
-- `--include ts,tsx,js,jsx,...` — included extensions
+- `--deep` — add locals, properties, type and enum members, and imports to `--mode outline`
+- `--signatures` — add parameters and return types to callables in `--mode outline`
+- `--exported` — keep only exported symbols and re-exports in `--mode outline`
+- `--include ts,tsx,js,jsx,...` — included extensions (default `ts,tsx,mts,cts,js,jsx,mjs,cjs`)
 - `--exclude <patterns>` — excluded paths
 - `--max-bytes <bytes>` — maximum file size
 - `--function-kinds top|top+arrow|top+arrow+class|all` — function categories
@@ -252,12 +275,32 @@ scanr tree
 scanr tree --path src/commands
 scanr tree --depth 4 --inline 8
 scanr tree --all
+scanr tree --outline
+scanr tree --outline --deep --path src/commands
+scanr tree --outline --signatures --exported
 scanr tree --functions
 scanr tree --functions --all-functions
 scanr tree --functions --function-details --function-min-lines 3 --function-max-lines 10
 scanr tree --health --only-findings --top 20 --sort-by coupling
 scanr tree --health --json
 ```
+
+`--outline` prints each file's nested declarations under the file, the readable form of `scan --mode outline`:
+
+```text
+└── src/
+    ├── events.layer.ts
+    │   ├── make                     (line 22)
+    │   │   ├── db
+    │   │   ├── priceOf()            (line 51)
+    │   │   └── record()             (line 79)
+    │   └── layer          exported  (line 163)
+    └── index.ts
+        ├── layer  re-exported from ./events.layer.ts
+        └── *      re-exported from ./events.errors.ts
+```
+
+Indentation means "lives inside", `()` marks a function, and the middle column carries the kind (`class`, `interface`, `type`, `enum`, `namespace`, `let`, `var`, `getter`, `setter`) and `exported`. `--deep` adds locals, properties, type and enum members, each symbol's callee (`make = Effect.gen`), `extends`, and an `imports` row. `--signatures` replaces `()` with the parameters and return type, and `--exported` keeps only exported symbols and re-exports. `--outline` cannot be combined with `--functions` or `--health`.
 
 `--functions` annotates files with dotted function names. Anonymous callbacks are summarized as `+N anonymous`; `--all-functions` expands them. `--low-value-max-lines` controls `[L]` candidates, and `--duplicate-threshold` controls `[D:n]` groups (default `0.87`). Duplicate markers include one-line functions, and exact short matches are not size-penalized.
 
@@ -283,6 +326,61 @@ Health controls:
 
 Medium/high thresholds are respectively: file lines `300/500`, total functions `15/30`, anonymous callbacks `10/20`, total parent-variable uses `15/30`, duplicate removable lines `10/30`, branch complexity `8/15`, control nesting `3/5`, hooks `8/15`, state calls `4/8`, effect calls `3/5`, dependencies `15/25`, and exports `8/15`. Wrapper density is reported at three or more wrappers and 30% (medium) or 50% (high).
 
+### `scanr roles`
+
+Group files by name suffix and list the ones that break their group's pattern:
+
+```bash
+scanr roles
+scanr roles --min-files 3 --usual 90 --unusual 5
+scanr roles --json
+```
+
+A file's role is the suffix before its extension: `events.layer.ts` is `.layer`, `index.ts` is `index`, and a file without a suffix is `(no suffix)`. Test files are left out. Each file has traits read from its top-level outline and its resolved imports: every declared name (`` `make` ``, ``exported `layer` ``), every kind of declaration (`exported class`, `internal function`), every producer (`exported const = Config.all`), `re-exports`, and every role it imports (`imports .types`).
+
+A trait shared by at least `--usual` percent of a role's files (default `80`) is usual, and a file without it is reported under `missing`. A kind of declaration or an imported role found in at most `--unusual` percent of the files (default `10`) is reported under `unusual` with its count, such as `imports .fake (1 of 18)`. Names and producers are never unusual, since they vary freely. A role that shares no trait has no pattern to break and reports no odd ones out. Roles with fewer than `--min-files` files (default `5`) are listed at the end, because a one-off suffix can itself be drift.
+
+`--json` emits `{version,roles:[{role,files,usual:[{trait,files}],outliers:[{file,missing,unusual}]}],smallRoles}`.
+
+### `scanr deps`
+
+Show what each file imports, resolved to project files, and what imports it:
+
+```bash
+scanr deps
+scanr deps --path src/commands
+scanr deps --path src/events.layer.ts --json
+```
+
+Each file lists the project files it imports (marked `(type)` when every import of that module is `import type`), the packages it uses, any relative import that resolves to no file or to several, and the files that import it. Imports include `import`, `export … from`, and literal `import()`. Resolution follows relative paths, `tsconfig.json` `paths` (nearest config, with relative `extends`), and workspace packages linked under `node_modules`. `--path` limits the files shown to one file or directory; importers still come from the whole root, tests included.
+
+`--json` emits `{version,files:[{file,imports:[{source,file?,package?,typeOnly?}],importedBy}]}`. An import with neither `file` nor `package` is unresolved.
+
+### `scanr diff`
+
+Report what a change did to the project's declarations:
+
+```bash
+scanr diff --base main
+scanr diff --base HEAD~1 --deep
+scanr diff --base main --json
+```
+
+It compares the outline of every changed file in the working tree with the same file at `--base`. Untracked files count as added, and file renames follow Git. Each changed declaration is one row:
+
+```text
+src/events.layer.ts
+  > make.helper() → helper()                    moved to src/events.utils.ts
+  ~ make.memberships() → make.membershipList()  renamed
+  ~ make.record()                               signature (event: Event) → (event: Event, force: boolean)
+  + make.prune()                                added
+  - make.legacy()                               removed
+```
+
+`~` rows without `renamed` describe a symbol that stayed in place: a new signature, `now exported` or `no longer exported`, another kind, producer, or superclass. A symbol is moved when its name and kind left exactly one place and arrived in exactly one place, in the same file or another. A rename is claimed only with evidence: mostly the same members, the same signature for callables (a bare `()` also needs the same length), or the same producer for plain values. Anything else is reported as one removal and one addition. Members of an added, removed, or moved symbol are not listed separately. `--deep` also compares locals, properties, and type and enum members.
+
+`--json` emits `{version,base,resolvedBase,files:[{file,status,from?,changes:[{change,symbol,kind,to?,toFile?,details?}]}]}` with `status` one of `added`, `deleted`, `modified`, `renamed`.
+
 ### `scanr xray`
 
 Print a one-page project overview for an agent opening an unknown repository:
@@ -306,16 +404,20 @@ Each section points to the command with full detail: `tree --health`, `slop`, an
 ## Agent workflow
 
 1. `scanr xray --root .` — one-page overview before anything else.
-2. `scanr scan --mode inventory --root .` — name lists first (functions, constants, types, components, hooks, classes, enums, exports).
-3. `scanr refs <name> --root .` — declarations and usage sites for a name.
-4. `scanr rename <Name|file#Name> <NewName> --root . --dry-run` — preview a type-accurate rename, then rerun without `--dry-run` and review `leftovers`.
-5. `scanr slop --root .` — review exact, contextual, and test-theater signals one finding per row.
-6. `scanr slop --root . --base HEAD~1` — add the three tracked-working-tree diff signals.
-7. `scanr tree --health --only-findings --top 20` — rank metric-backed hotspots.
-8. `scanr tree --functions --function-details --path <hotspot>` — inspect ownership and similarity in context.
-9. `scanr scan --mode verbose --rules hoistable_nested_function,low_value_function` — inspect captures and rule evidence.
-10. `scanr dupes --types` — inspect similar function/type pairs.
-11. `scanr search <name> --json` — literal hunt when refs is too narrow.
+2. `scanr tree --outline --path <folder>` (or `scanr scan --mode outline`) — how each file is organized: nested declarations, wrapped functions, re-exports.
+3. `scanr roles --root .` — which files break the pattern their name suffix promises.
+4. `scanr deps --path <file-or-folder>` — what a file depends on and what depends on it, before moving or splitting it.
+5. `scanr diff --base <ref>` — review a refactor by its declarations: added, removed, renamed, moved, changed.
+6. `scanr scan --mode inventory --root .` — flat name lists (functions, constants, variables, types, components, hooks, classes, enums, namespaces, exports).
+7. `scanr refs <name> --root .` — declarations and usage sites for a name.
+8. `scanr rename <Name|file#Name> <NewName> --root . --dry-run` — preview a type-accurate rename, then rerun without `--dry-run` and review `leftovers`.
+9. `scanr slop --root .` — review exact, contextual, and test-theater signals one finding per row.
+10. `scanr slop --root . --base HEAD~1` — add the three tracked-working-tree diff signals.
+11. `scanr tree --health --only-findings --top 20` — rank metric-backed hotspots.
+12. `scanr tree --functions --function-details --path <hotspot>` — inspect ownership and similarity in context.
+13. `scanr scan --mode verbose --rules hoistable_nested_function,low_value_function` — inspect captures and rule evidence.
+14. `scanr dupes --types` — inspect similar function/type pairs.
+15. `scanr search <name> --json` — literal hunt when refs is too narrow.
 
 ## Development
 

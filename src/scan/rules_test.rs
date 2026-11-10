@@ -41,6 +41,8 @@ fn mk_fi(path: &str, fn_names: &[&str], binding_unused: bool) -> FileIndex {
         bindings,
         types: vec![],
         exports: vec![],
+        outline: crate::scan::outline::FileOutline::default(),
+        line_count: 0,
         violations: vec![],
         parse_errors: 0,
         slop: FileFacts::default(),

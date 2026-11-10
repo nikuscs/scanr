@@ -1,20 +1,21 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use oxc::ast::ast::{
-    ArrowFunctionBody, ArrowFunctionExpression, BindingPattern, CallExpression, Class, Declaration,
-    ExportDeclaration, ExportDefaultDeclaration, ExportDefaultDeclarationKind,
-    ExportNamedDeclaration, Expression, FormalParameters, Function, FunctionBody, FunctionType,
-    JSXElement, JSXFragment, MethodDefinition, MethodDefinitionKind, ObjectProperty, PropertyKind,
-    Statement, TSInterfaceDeclaration, TSTypeAliasDeclaration, VariableDeclarator,
+    ArrowFunctionBody, ArrowFunctionExpression, BindingPattern, CallExpression, Class,
+    ExportDeclaration, ExportDefaultDeclaration, Expression, FormalParameters, Function,
+    FunctionBody, FunctionType, JSXElement, JSXFragment, MethodDefinition, MethodDefinitionKind,
+    ObjectProperty, PropertyKind, Statement, TSInterfaceDeclaration, TSTypeAliasDeclaration,
 };
 use oxc::ast_visit::{self, Visit};
 use oxc::semantic::Semantic;
 use oxc::syntax::scope::{ScopeFlags, ScopeId};
 use oxc::syntax::symbol::SymbolFlags;
 
+use super::outline::build_outline;
+use crate::scan::outline::{FileOutline, Symbol, SymbolKind};
 use crate::scan::types::{
-    BindingInfo, BindingKind, ClassInfo, EXPORT_DEFAULT, EXPORT_NAMED, ExportInfo, FunctionContent,
-    FunctionInfo, FunctionKind, FunctionKindsFilter, LineIndex, TypeDeclKind, TypeInfo,
+    BindingInfo, BindingKind, ClassInfo, ExportInfo, FunctionContent, FunctionInfo, FunctionKind,
+    FunctionKindsFilter, LineIndex, TypeDeclKind, TypeInfo,
 };
 
 pub struct ExtractionResult {
@@ -23,6 +24,10 @@ pub struct ExtractionResult {
     pub bindings: Vec<BindingInfo>,
     pub types: Vec<TypeInfo>,
     pub exports: Vec<ExportInfo>,
+    /// Local names exported under any name, plus `default`.
+    pub exported_locals: HashSet<String>,
+    pub outline: FileOutline,
+    pub line_count: u32,
 }
 
 pub fn extract_file(
@@ -32,13 +37,13 @@ pub fn extract_file(
     filter: FunctionKindsFilter,
 ) -> ExtractionResult {
     let lines = LineIndex::new(source);
+    let outlined = build_outline(program, source, &lines);
 
     let mut collector = Collector {
         functions: Vec::new(),
         classes: Vec::new(),
         types: Vec::new(),
-        exported_names: HashSet::new(),
-        exports: Vec::new(),
+        exported_names: outlined.exported_locals,
         lines: &lines,
         filter,
         in_export: false,
@@ -46,12 +51,12 @@ pub fn extract_file(
         in_method: false,
     };
     collector.visit_program(program);
-
-    for type_info in &mut collector.types {
-        if collector.exported_names.contains(&type_info.name) {
-            type_info.exported = true;
-        }
-    }
+    name_declared_functions(
+        &mut collector.functions,
+        &outlined.outline,
+        &collector.exported_names,
+        filter,
+    );
 
     let bindings = extract_bindings(semantic, &lines, &collector.exported_names);
     let functions = enrich_functions(collector.functions, semantic);
@@ -61,7 +66,60 @@ pub fn extract_file(
         classes: collector.classes,
         bindings,
         types: collector.types,
-        exports: collector.exports,
+        exports: outlined.exports,
+        exported_locals: collector.exported_names,
+        outline: outlined.outline,
+        line_count: source.lines().count() as u32,
+    }
+}
+
+/// Names the functions that a declaration binds rather than names itself:
+/// `const f = () => {}`, recognized wrappers such as `memo(() => {})`, and
+/// function-valued members such as `{ run: () => {} }` or `run = () => {}`.
+/// The outline decides what counts as declared.
+fn name_declared_functions(
+    records: &mut Vec<FunctionRecord>,
+    outline: &FileOutline,
+    exported_names: &HashSet<String>,
+    filter: FunctionKindsFilter,
+) {
+    let mut declared = HashMap::new();
+    collect_declared_functions(&outline.symbols, None, &mut declared);
+
+    for record in records.iter_mut().filter(|record| record.info.name.is_none()) {
+        let Some((name, member_kind)) = declared.remove(&(record.info.line, record.info.col))
+        else {
+            continue;
+        };
+        if let Some(kind) = member_kind {
+            // A member is reached through its owner; it is not a module export.
+            record.info.kind = kind;
+            record.info.exported = false;
+        } else {
+            record.info.exported |= exported_names.contains(&name);
+        }
+        record.info.name = Some(name);
+    }
+    records.retain(|record| filter.includes(record.info.kind));
+}
+
+/// Maps a function's position to its declared name and, for a member, the
+/// method kind of its owner.
+fn collect_declared_functions(
+    symbols: &[Symbol],
+    owner: Option<SymbolKind>,
+    declared: &mut HashMap<(u32, u32), (String, Option<FunctionKind>)>,
+) {
+    for symbol in symbols {
+        if let Some(position) = symbol.function_position {
+            let member_kind = match (symbol.kind, owner) {
+                (SymbolKind::Method, Some(SymbolKind::Class)) => Some(FunctionKind::ClassMethod),
+                (SymbolKind::Method, _) => Some(FunctionKind::ObjectMethod),
+                _ => None,
+            };
+            declared.insert(position, (symbol.name.clone(), member_kind));
+        }
+        collect_declared_functions(&symbol.children, Some(symbol.kind), declared);
     }
 }
 
@@ -76,7 +134,6 @@ struct Collector<'s> {
     classes: Vec<ClassInfo>,
     types: Vec<TypeInfo>,
     exported_names: HashSet<String>,
-    exports: Vec<ExportInfo>,
     lines: &'s LineIndex,
     filter: FunctionKindsFilter,
     in_export: bool,
@@ -123,11 +180,6 @@ impl Collector<'_> {
         });
     }
 
-    fn record_export(&mut self, name: &str, kind_code: u8) {
-        self.exported_names.insert(name.to_string());
-        self.exports.push(ExportInfo { name: name.to_string(), kind_code });
-    }
-
     fn push_type(&mut self, name: &str, kind: TypeDeclKind, span_start: u32) {
         self.types.push(TypeInfo {
             name: name.to_string(),
@@ -165,41 +217,13 @@ impl<'a> Visit<'a> for Collector<'_> {
         ast_visit::walk::walk_class(self, it);
     }
 
-    fn visit_export_named_declaration(&mut self, it: &ExportNamedDeclaration<'a>) {
-        // `export { foo, bar }` — specifiers
-        for spec in &it.specifiers {
-            let local_name = spec.local.to_string();
-            self.record_export(&local_name, EXPORT_NAMED);
-        }
-
-        ast_visit::walk::walk_export_named_declaration(self, it);
-    }
-
     fn visit_export_declaration(&mut self, it: &ExportDeclaration<'a>) {
-        self.collect_declaration_names(&it.declaration, EXPORT_NAMED);
         self.in_export = true;
         ast_visit::walk::walk_export_declaration(self, it);
         self.in_export = false;
     }
 
     fn visit_export_default_declaration(&mut self, it: &ExportDefaultDeclaration<'a>) {
-        self.record_export("default", EXPORT_DEFAULT);
-
-        // If it's a named function/class, also record that name
-        match &it.declaration {
-            ExportDefaultDeclarationKind::FunctionDeclaration(f) => {
-                if let Some(id) = &f.id {
-                    self.record_export(id.name.as_str(), EXPORT_DEFAULT);
-                }
-            }
-            ExportDefaultDeclarationKind::ClassDeclaration(c) => {
-                if let Some(id) = &c.id {
-                    self.record_export(id.name.as_str(), EXPORT_DEFAULT);
-                }
-            }
-            _ => {}
-        }
-
         self.in_default_export = true;
         ast_visit::walk::walk_export_default_declaration(self, it);
         self.in_default_export = false;
@@ -236,7 +260,7 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
-        // Name is captured in visit_variable_declarator
+        // Named afterwards by `name_declared_functions`.
         self.push_function(
             None,
             FunctionKind::Arrow,
@@ -247,25 +271,6 @@ impl<'a> Visit<'a> for Collector<'_> {
             it.span.end,
         );
         ast_visit::walk::walk_arrow_function_expression(self, it);
-    }
-
-    fn visit_variable_declarator(&mut self, it: &VariableDeclarator<'a>) {
-        // `const foo = () => {}` — give the arrow function its binding name
-        if let Some(Expression::ArrowFunctionExpression(_)) = &it.init
-            && let BindingPattern::BindingIdentifier(id) = &it.id
-        {
-            let name = id.name.to_string();
-            let prev_count = self.functions.len();
-            ast_visit::walk::walk_variable_declarator(self, it);
-            if self.functions.len() > prev_count {
-                let first_new = &mut self.functions[prev_count].info;
-                if first_new.kind == FunctionKind::Arrow && first_new.name.is_none() {
-                    first_new.name = Some(name);
-                }
-            }
-            return;
-        }
-        ast_visit::walk::walk_variable_declarator(self, it);
     }
 
     fn visit_method_definition(&mut self, it: &MethodDefinition<'a>) {
@@ -338,38 +343,6 @@ impl Collector<'_> {
             .find(|record| record.span_start <= span_start && record.span_end >= span_end)
         {
             record.info.content = FunctionContent::Jsx;
-        }
-    }
-
-    fn collect_declaration_names(&mut self, decl: &Declaration<'_>, kind_code: u8) {
-        match decl {
-            Declaration::FunctionDeclaration(f) => {
-                if let Some(id) = &f.id {
-                    self.record_export(id.name.as_str(), kind_code);
-                }
-            }
-            Declaration::ClassDeclaration(c) => {
-                if let Some(id) = &c.id {
-                    self.record_export(id.name.as_str(), kind_code);
-                }
-            }
-            Declaration::VariableDeclaration(v) => {
-                for declarator in &v.declarations {
-                    if let BindingPattern::BindingIdentifier(id) = &declarator.id {
-                        self.record_export(id.name.as_str(), kind_code);
-                    }
-                }
-            }
-            Declaration::TSEnumDeclaration(e) => {
-                self.record_export(e.id.name.as_str(), kind_code);
-            }
-            Declaration::TSInterfaceDeclaration(i) => {
-                self.record_export(i.id.name.as_str(), kind_code);
-            }
-            Declaration::TSTypeAliasDeclaration(t) => {
-                self.record_export(t.id.name.as_str(), kind_code);
-            }
-            _ => {}
         }
     }
 }

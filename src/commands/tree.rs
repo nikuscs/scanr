@@ -1,3 +1,5 @@
+mod outline;
+
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -8,7 +10,8 @@ use anyhow::{Context, Result};
 use rayon::prelude::*;
 use serde::Serialize;
 
-use crate::cli::HealthSort;
+use self::outline::{collect_outlines, render_outline_tree};
+use crate::cli::{HealthSort, TreeArgs};
 use crate::commands::dupes::{FunctionDuplicateKey, function_duplicate_groups};
 use crate::scan::rules::{hoistable_function, is_test_path, low_value_function};
 use crate::scan::types::{FileIndex, FunctionInfo, FunctionKindsFilter};
@@ -42,31 +45,12 @@ const INCLUDE_EXTS: &[&str] = &[
 const STRIP_EXTS: &[&str] =
     &["cjs", "cts", "go", "java", "js", "jsx", "mjs", "mts", "py", "rs", "ts", "tsx"];
 
-#[allow(clippy::too_many_arguments, clippy::fn_params_excessive_bools)]
-pub fn run(
-    root: &str,
-    subpath: Option<&str>,
-    depth: usize,
-    inline: usize,
-    all: bool,
-    functions: bool,
-    all_functions: bool,
-    low_value_max_lines: u32,
-    duplicate_threshold: f64,
-    function_details: bool,
-    function_min_lines: u32,
-    function_max_lines: u32,
-    health: bool,
-    only_findings: bool,
-    top: Option<usize>,
-    sort_by: Option<HealthSort>,
-    json: bool,
-) -> Result<()> {
+pub fn run(args: &TreeArgs) -> Result<()> {
     let project =
-        fs::canonicalize(root).context("Cannot resolve project root")?.display().to_string();
+        fs::canonicalize(&args.root).context("Cannot resolve project root")?.display().to_string();
     let project_root = PathBuf::from(&project);
 
-    let start_rel = subpath.unwrap_or("").trim_matches('/');
+    let start_rel = args.path.as_deref().unwrap_or("").trim_matches('/');
     let start_path =
         if start_rel.is_empty() { project_root.clone() } else { project_root.join(start_rel) };
 
@@ -77,54 +61,59 @@ pub fn run(
         anyhow::bail!("Path must be inside the project root");
     }
 
-    if !(0.0..=1.0).contains(&duplicate_threshold) {
+    if !(0.0..=1.0).contains(&args.duplicate_threshold) {
         anyhow::bail!("Duplicate threshold must be between 0 and 1");
     }
-    if function_details && function_min_lines == 0 {
+    if args.function_details && args.function_min_lines == 0 {
         anyhow::bail!("Function minimum lines must be at least 1");
     }
-    if function_details && function_min_lines > function_max_lines {
+    if args.function_details && args.function_min_lines > args.function_max_lines {
         anyhow::bail!("Function minimum lines cannot exceed maximum lines");
     }
 
-    let annotations = if functions || health {
+    let annotations = if args.functions || args.health {
         build_function_annotations(
             &start_path,
             &project_root,
-            all_functions,
-            low_value_max_lines,
-            duplicate_threshold,
-            health,
-            all,
+            args.all_functions,
+            args.low_value_max_lines,
+            args.duplicate_threshold,
+            args.health,
+            args.all,
         )?
     } else {
         BTreeMap::new()
     };
-    let tree = build_node(&start_path, &project_root, all, &annotations)?;
-    if health {
+    let tree = build_node(&start_path, &project_root, args.all, &annotations)?;
+    if args.health {
         return write_health_report(
             &tree,
             &project,
-            only_findings,
-            top,
-            sort_by.unwrap_or(HealthSort::Severity),
-            json,
+            args.only_findings,
+            args.top,
+            args.sort_by.unwrap_or(HealthSort::Severity),
+            args.json,
         );
     }
 
+    let depth = args.depth.max(1);
     let mut lines = Vec::new();
     lines.push("# Project Structure".to_string());
     lines.push(String::new());
-    if function_details {
+    if args.outline {
+        let view = args.outline_view();
+        let outlines = collect_outlines(&start_path, &project_root, args.all, view)?;
+        render_outline_tree(&tree, &outlines, &mut lines, depth, view.deep);
+    } else if args.function_details {
         render_detailed_tree(
             &tree,
             &mut lines,
-            depth.max(1),
-            function_min_lines,
-            function_max_lines,
+            depth,
+            args.function_min_lines,
+            args.function_max_lines,
         );
     } else {
-        render_node(&tree, &mut lines, "", true, 0, depth.max(1), inline.max(1));
+        render_node(&tree, &mut lines, "", true, 0, depth, args.inline.max(1));
     }
 
     let output = lines.join("\n");

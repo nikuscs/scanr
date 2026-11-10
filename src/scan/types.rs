@@ -227,7 +227,6 @@ pub struct ExportInfo {
 
 pub const EXPORT_NAMED: u8 = 1;
 pub const EXPORT_DEFAULT: u8 = 2;
-#[allow(dead_code)]
 pub const EXPORT_REEXPORT: u8 = 3;
 
 #[derive(Debug, Clone, Serialize)]
@@ -245,6 +244,8 @@ pub struct FileIndex {
     pub bindings: Vec<BindingInfo>,
     pub types: Vec<TypeInfo>,
     pub exports: Vec<ExportInfo>,
+    pub outline: crate::scan::outline::FileOutline,
+    pub line_count: u32,
     pub violations: Vec<Violation>,
     pub parse_errors: usize,
     pub slop: crate::slop::types::FileFacts,
@@ -276,8 +277,11 @@ pub enum OutputMode {
     Files,
     /// Group by folder: { folders: { "dir": { functions, names } } }
     Folders,
-    /// Name lists: functions, constants, types, components, hooks, classes, enums, exports
+    /// Name lists: functions, constants, variables, types, components, hooks, classes, enums,
+    /// namespaces, exports
     Inventory,
+    /// Nested declarations per file: { files: [{ file, lines, symbols, reexports }] }
+    Outline,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]

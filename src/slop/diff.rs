@@ -1,11 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::path::Path;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow};
 use serde_json::{Map, Value};
 
+use crate::git::{Base, resolve_base, run_git, run_git_owned, utf8_stdout};
 use crate::scan::types::FunctionRole;
 use crate::slop::test_detectors::duplicated_test_groups;
 use crate::slop::types::{
@@ -91,24 +91,8 @@ impl DiffScope {
 }
 
 pub fn load_diff_scope(root: &Path, base: &str) -> Result<DiffScope> {
-    let root = root.canonicalize().context("Cannot resolve project root for --base")?;
-    require_worktree(&root)?;
-    let repo_root_output = run_git(&root, ["rev-parse", "--show-toplevel"], "locate Git worktree")?;
-    let repo_root_text = utf8_stdout(&repo_root_output, "Git worktree path")?;
-    let repo_root = PathBuf::from(repo_root_text.trim())
-        .canonicalize()
-        .with_context(|| format!("cannot resolve Git worktree root `{}`", repo_root_text.trim()))?;
-    let root_prefix = root
-        .strip_prefix(&repo_root)
-        .map_err(|_| anyhow!("analysis root is not inside the resolved Git worktree"))?;
-
-    let revision = format!("{base}^{{commit}}");
-    let resolved_output = run_git(
-        &root,
-        ["rev-parse", "--verify", "--end-of-options", revision.as_str()],
-        &format!("resolve --base `{base}`"),
-    )?;
-    let resolved_base = utf8_stdout(&resolved_output, "resolved Git base")?.trim().to_string();
+    let Base { root, repo_root, root_prefix, commit: resolved_base } = resolve_base(root, base)?;
+    let root_prefix = root_prefix.as_path();
 
     let names = run_git(
         &root,
@@ -149,55 +133,6 @@ pub fn load_diff_scope(root: &Path, base: &str) -> Result<DiffScope> {
     let dependency_additions =
         load_dependency_additions(&root, &repo_root, root_prefix, &resolved_base, &files)?;
     Ok(DiffScope { requested_base: base.to_string(), resolved_base, files, dependency_additions })
-}
-
-fn require_worktree(root: &Path) -> Result<()> {
-    let output = Command::new("git")
-        .arg("--no-pager")
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .current_dir(root)
-        .output()
-        .context("failed to execute Git for --base")?;
-    if !output.status.success() || output.stdout != b"true\n" {
-        bail!("--base requires a Git worktree at `{}`", root.display());
-    }
-    Ok(())
-}
-
-fn run_git<'a>(
-    root: &Path,
-    args: impl IntoIterator<Item = &'a str>,
-    operation: &str,
-) -> Result<Output> {
-    let output = Command::new("git")
-        .arg("--no-pager")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .with_context(|| format!("failed to execute Git while attempting to {operation}"))?;
-    check_git_output(output, operation)
-}
-
-fn run_git_owned(root: &Path, args: &[String], operation: &str) -> Result<Output> {
-    let output = Command::new("git")
-        .arg("--no-pager")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .with_context(|| format!("failed to execute Git while attempting to {operation}"))?;
-    check_git_output(output, operation)
-}
-
-fn check_git_output(output: Output, operation: &str) -> Result<Output> {
-    if output.status.success() {
-        return Ok(output);
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    bail!("failed to {operation}: {}", stderr.trim());
-}
-
-fn utf8_stdout<'a>(output: &'a Output, label: &str) -> Result<&'a str> {
-    std::str::from_utf8(&output.stdout).with_context(|| format!("{label} is not valid UTF-8"))
 }
 
 fn parse_name_status(bytes: &[u8]) -> Result<Vec<(String, DiffFileStatus)>> {

@@ -1,6 +1,9 @@
+pub mod deps;
+pub mod diff;
 pub mod dupes;
 pub mod refs;
 pub mod rename;
+pub mod roles;
 pub mod scan;
 pub mod search;
 pub mod slop;

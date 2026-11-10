@@ -13,8 +13,17 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Resolved imports per file: what each file depends on and what depends on it
+    Deps(DepsArgs),
+
+    /// Declarations added, removed, renamed, moved, or changed since a Git base
+    Diff(DiffArgs),
+
     /// Find duplicate and similar functions and types
     Dupes(DupesArgs),
+
+    /// Group files by name suffix and list the ones that break their group's pattern
+    Roles(RolesArgs),
 
     /// Report deterministic, evidence-backed code-slop review signals
     Slop(SlopArgs),
@@ -29,75 +38,7 @@ pub enum Commands {
     Search(SearchArgs),
 
     /// Compact project structure overview for fast orientation
-    Tree {
-        /// Project root directory
-        #[arg(long, default_value = ".")]
-        root: String,
-
-        /// Focus on a subdirectory within the project root
-        #[arg(long)]
-        path: Option<String>,
-
-        /// Max branching depth before collapsing subtrees
-        #[arg(long, default_value_t = 6)]
-        depth: usize,
-
-        /// Max files shown per line before wrapping
-        #[arg(long, default_value_t = 6)]
-        inline: usize,
-
-        /// Include test directories and test files
-        #[arg(long)]
-        all: bool,
-
-        /// Annotate files with compact function trees and analysis markers
-        #[arg(long)]
-        functions: bool,
-
-        /// Show anonymous callbacks instead of summarizing their count
-        #[arg(long, requires = "functions")]
-        all_functions: bool,
-
-        /// Maximum lines for low-value function candidates
-        #[arg(long, default_value_t = 3, requires = "functions")]
-        low_value_max_lines: u32,
-
-        /// Similarity threshold for duplicate-group markers (0-1)
-        #[arg(long, default_value_t = 0.87, requires = "functions")]
-        duplicate_threshold: f64,
-
-        /// Render nested functions with plain-English analysis details
-        #[arg(long, requires = "functions")]
-        function_details: bool,
-
-        /// Minimum function length shown by --function-details
-        #[arg(long, default_value_t = 3, requires = "function_details")]
-        function_min_lines: u32,
-
-        /// Maximum function length shown by --function-details
-        #[arg(long, default_value_t = 10, requires = "function_details")]
-        function_max_lines: u32,
-
-        /// Show deterministic code-health metrics and findings
-        #[arg(long, conflicts_with = "function_details")]
-        health: bool,
-
-        /// Show only files with health findings
-        #[arg(long, requires = "health")]
-        only_findings: bool,
-
-        /// Limit health output to the first N files after sorting
-        #[arg(long, requires = "health")]
-        top: Option<usize>,
-
-        /// Rank health output by a specific metric
-        #[arg(long, value_enum, requires = "health")]
-        sort_by: Option<HealthSort>,
-
-        /// Emit structured JSON for --health
-        #[arg(long, requires = "health")]
-        json: bool,
-    },
+    Tree(TreeArgs),
 
     /// One-page project overview: shape, hotspots, slop, and duplicates
     Xray(XrayArgs),
@@ -188,6 +129,161 @@ pub struct SlopArgs {
     pub tsconfig: Vec<String>,
 
     /// Emit stable schema-versioned JSON
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Clone)]
+#[allow(clippy::struct_excessive_bools)]
+pub struct TreeArgs {
+    /// Project root directory
+    #[arg(long, default_value = ".")]
+    pub root: String,
+
+    /// Focus on a subdirectory within the project root
+    #[arg(long)]
+    pub path: Option<String>,
+
+    /// Max branching depth before collapsing subtrees
+    #[arg(long, default_value_t = 6)]
+    pub depth: usize,
+
+    /// Max files shown per line before wrapping
+    #[arg(long, default_value_t = 6)]
+    pub inline: usize,
+
+    /// Include test directories and test files
+    #[arg(long)]
+    pub all: bool,
+
+    /// Annotate files with compact function trees and analysis markers
+    #[arg(long)]
+    pub functions: bool,
+
+    /// Show anonymous callbacks instead of summarizing their count
+    #[arg(long, requires = "functions")]
+    pub all_functions: bool,
+
+    /// Maximum lines for low-value function candidates
+    #[arg(long, default_value_t = 3, requires = "functions")]
+    pub low_value_max_lines: u32,
+
+    /// Similarity threshold for duplicate-group markers (0-1)
+    #[arg(long, default_value_t = 0.87, requires = "functions")]
+    pub duplicate_threshold: f64,
+
+    /// Render nested functions with plain-English analysis details
+    #[arg(long, requires = "functions")]
+    pub function_details: bool,
+
+    /// Minimum function length shown by --function-details
+    #[arg(long, default_value_t = 3, requires = "function_details")]
+    pub function_min_lines: u32,
+
+    /// Maximum function length shown by --function-details
+    #[arg(long, default_value_t = 10, requires = "function_details")]
+    pub function_max_lines: u32,
+
+    /// Show each file's nested declarations: functions, constants, classes, types, re-exports
+    #[arg(long, conflicts_with_all = ["functions", "health"])]
+    pub outline: bool,
+
+    /// Add locals, properties, type and enum members, and imports to --outline
+    #[arg(long, requires = "outline")]
+    pub deep: bool,
+
+    /// Show parameters and return types of callables in --outline
+    #[arg(long, requires = "outline")]
+    pub signatures: bool,
+
+    /// Show only exported symbols and re-exports in --outline
+    #[arg(long, requires = "outline")]
+    pub exported: bool,
+
+    /// Show deterministic code-health metrics and findings
+    #[arg(long, conflicts_with = "function_details")]
+    pub health: bool,
+
+    /// Show only files with health findings
+    #[arg(long, requires = "health")]
+    pub only_findings: bool,
+
+    /// Limit health output to the first N files after sorting
+    #[arg(long, requires = "health")]
+    pub top: Option<usize>,
+
+    /// Rank health output by a specific metric
+    #[arg(long, value_enum, requires = "health")]
+    pub sort_by: Option<HealthSort>,
+
+    /// Emit structured JSON for --health
+    #[arg(long, requires = "health")]
+    pub json: bool,
+}
+
+impl TreeArgs {
+    pub const fn outline_view(&self) -> crate::scan::outline::OutlineView {
+        crate::scan::outline::OutlineView {
+            deep: self.deep,
+            signatures: self.signatures,
+            exported: self.exported,
+        }
+    }
+}
+
+#[derive(clap::Args, Clone)]
+pub struct DepsArgs {
+    /// Project root directory
+    #[arg(long, default_value = ".")]
+    pub root: String,
+
+    /// Show only files under this file or directory; importers still come from the whole root
+    #[arg(long)]
+    pub path: Option<String>,
+
+    /// Emit structured JSON instead of text
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Clone)]
+pub struct DiffArgs {
+    /// Git revision to compare the working tree against
+    #[arg(long)]
+    pub base: String,
+
+    /// Project root directory
+    #[arg(long, default_value = ".")]
+    pub root: String,
+
+    /// Also compare locals, properties, and type and enum members
+    #[arg(long)]
+    pub deep: bool,
+
+    /// Emit structured JSON instead of text
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(clap::Args, Clone)]
+pub struct RolesArgs {
+    /// Project root directory
+    #[arg(long, default_value = ".")]
+    pub root: String,
+
+    /// Smallest group of files that counts as a role
+    #[arg(long, default_value_t = 5)]
+    pub min_files: usize,
+
+    /// Percent of a role's files that must share a trait for it to be usual
+    #[arg(long, default_value_t = 80, value_parser = clap::value_parser!(u8).range(1..=100))]
+    pub usual: u8,
+
+    /// Percent of a role's files at or below which a trait is unusual
+    #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u8).range(0..=100))]
+    pub unusual: u8,
+
+    /// Emit structured JSON instead of text
     #[arg(long)]
     pub json: bool,
 }
@@ -335,6 +431,28 @@ pub struct ScanArgs {
     /// Include source line numbers in --mode inventory
     #[arg(long)]
     pub lines: bool,
+
+    /// Add locals, properties, type and enum members, and imports to --mode outline
+    #[arg(long)]
+    pub deep: bool,
+
+    /// Add parameters and return types to callables in --mode outline
+    #[arg(long)]
+    pub signatures: bool,
+
+    /// Keep only exported symbols and re-exports in --mode outline
+    #[arg(long)]
+    pub exported: bool,
+}
+
+impl ScanArgs {
+    pub const fn outline_view(&self) -> crate::scan::outline::OutlineView {
+        crate::scan::outline::OutlineView {
+            deep: self.deep,
+            signatures: self.signatures,
+            exported: self.exported,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -394,6 +512,84 @@ mod tests {
         };
         assert_eq!(args.mode, crate::scan::types::OutputMode::Inventory);
         assert!(args.lines);
+    }
+
+    #[test]
+    fn parses_scan_outline_mode_and_deep() {
+        let cli = Cli::try_parse_from(["scanr", "scan", "--mode", "outline", "--deep"]).unwrap();
+        let Commands::Scan(args) = cli.command else {
+            panic!("expected scan command");
+        };
+        assert_eq!(args.mode, crate::scan::types::OutputMode::Outline);
+        assert!(args.deep);
+    }
+
+    #[test]
+    fn parses_tree_outline_and_rejects_conflicting_views() {
+        let cli =
+            Cli::try_parse_from(["scanr", "tree", "--outline", "--deep", "--path", "src"]).unwrap();
+        let Commands::Tree(args) = cli.command else {
+            panic!("expected tree command");
+        };
+        assert!(args.outline && args.deep);
+        assert_eq!(args.path.as_deref(), Some("src"));
+
+        assert!(Cli::try_parse_from(["scanr", "tree", "--deep"]).is_err());
+        assert!(Cli::try_parse_from(["scanr", "tree", "--outline", "--functions"]).is_err());
+        assert!(Cli::try_parse_from(["scanr", "tree", "--outline", "--health"]).is_err());
+    }
+
+    #[test]
+    fn parses_outline_view_flags_for_scan_and_tree() {
+        let cli = Cli::try_parse_from([
+            "scanr",
+            "scan",
+            "--mode",
+            "outline",
+            "--signatures",
+            "--exported",
+        ])
+        .unwrap();
+        let Commands::Scan(args) = cli.command else {
+            panic!("expected scan command");
+        };
+        let view = args.outline_view();
+        assert!(view.signatures && view.exported && !view.deep);
+
+        let cli = Cli::try_parse_from(["scanr", "tree", "--outline", "--signatures", "--exported"])
+            .unwrap();
+        let Commands::Tree(args) = cli.command else {
+            panic!("expected tree command");
+        };
+        let view = args.outline_view();
+        assert!(view.signatures && view.exported && !view.deep);
+        assert!(Cli::try_parse_from(["scanr", "tree", "--signatures"]).is_err());
+    }
+
+    #[test]
+    fn parses_deps_diff_and_roles() {
+        let cli = Cli::try_parse_from(["scanr", "deps", "--path", "src/a.ts", "--json"]).unwrap();
+        let Commands::Deps(args) = cli.command else {
+            panic!("expected deps command");
+        };
+        assert_eq!(args.path.as_deref(), Some("src/a.ts"));
+        assert!(args.json);
+
+        let cli = Cli::try_parse_from(["scanr", "diff", "--base", "main", "--deep"]).unwrap();
+        let Commands::Diff(args) = cli.command else {
+            panic!("expected diff command");
+        };
+        assert_eq!(args.base, "main");
+        assert!(args.deep);
+        assert!(Cli::try_parse_from(["scanr", "diff"]).is_err());
+
+        let cli =
+            Cli::try_parse_from(["scanr", "roles", "--min-files", "3", "--usual", "90"]).unwrap();
+        let Commands::Roles(args) = cli.command else {
+            panic!("expected roles command");
+        };
+        assert_eq!((args.min_files, args.usual, args.unusual), (3, 90, 10));
+        assert!(Cli::try_parse_from(["scanr", "roles", "--usual", "0"]).is_err());
     }
 
     #[test]

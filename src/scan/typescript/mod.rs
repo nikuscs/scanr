@@ -1,4 +1,5 @@
 pub mod extract;
+pub mod outline;
 pub mod parse;
 
 // Re-export for convenience: `scan::typescript::process_file`

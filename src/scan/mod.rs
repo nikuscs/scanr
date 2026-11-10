@@ -1,4 +1,7 @@
 pub mod health;
+pub mod inventory;
+pub mod outline;
+pub mod outline_diff;
 pub mod output;
 pub mod rules;
 pub mod types;
@@ -12,7 +15,7 @@ use rayon::prelude::*;
 
 use types::{FileIndex, FunctionKindsFilter, ScanResult, Stats};
 
-const DEFAULT_EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx"];
+const DEFAULT_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
 const DEFAULT_EXCLUDE_DIRS: &[&str] =
     &["node_modules", "dist", "build", ".next", ".git", "coverage", ".turbo", ".cache"];
 const DEFAULT_MAX_BYTES: u64 = 1_048_576; // 1 MB
@@ -27,7 +30,7 @@ pub struct ScanConfig {
 impl Default for ScanConfig {
     fn default() -> Self {
         Self {
-            extensions: vec!["ts".into(), "tsx".into(), "js".into(), "jsx".into()],
+            extensions: DEFAULT_EXTENSIONS.iter().map(ToString::to_string).collect(),
             exclude: Vec::new(),
             max_bytes: DEFAULT_MAX_BYTES,
             function_kinds: FunctionKindsFilter::All,
@@ -144,7 +147,7 @@ pub fn collect_files(root: &Path, config: &ScanConfig) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-fn has_matching_extension(path: &Path, extensions: &[&str]) -> bool {
+pub fn has_matching_extension(path: &Path, extensions: &[&str]) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .is_some_and(|ext| extensions.iter().any(|&e| e.eq_ignore_ascii_case(ext)))
@@ -205,7 +208,7 @@ mod tests {
     #[test]
     fn scan_config_default_extensions() {
         let cfg = ScanConfig::default();
-        assert_eq!(cfg.extensions, vec!["ts", "tsx", "js", "jsx"]);
+        assert_eq!(cfg.extensions, vec!["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"]);
     }
 
     #[test]

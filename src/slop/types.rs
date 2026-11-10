@@ -951,6 +951,8 @@ pub struct ProjectFacts {
     pub files: BTreeMap<String, FileFacts>,
     pub entrypoints: BTreeSet<String>,
     pub module_importers: BTreeMap<String, BTreeSet<String>>,
+    /// Every module specifier of every file, resolved: importer → specifier → target.
+    pub module_resolutions: BTreeMap<String, BTreeMap<String, Resolution<String>>>,
     pub declaration_metadata: BTreeMap<SymbolKey, DeclarationMetadata>,
     pub reinvention_matches: Vec<ReinventionMatch>,
     pub symbol_uses: BTreeMap<SymbolKey, Vec<SourceSpan>>,

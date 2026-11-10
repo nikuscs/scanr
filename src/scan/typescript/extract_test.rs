@@ -254,3 +254,53 @@ fn default_export_misc_and_assignment_pattern_fallback() {
         panic!("expected function declaration");
     }
 }
+
+#[test]
+fn declared_functions_take_their_name_from_the_outline() {
+    let allocator = Allocator::default();
+    let src = r"
+        export const record = Effect.fn('events.record')(function* (event) {
+            const inner = () => event;
+            return yield* inner();
+        });
+        const expression = function () {};
+        const total = items.reduce((sum, item) => sum + item, 0);
+        export const migration = { up: async (db) => db, down() {} };
+        class Service { handler = () => 1; run() {} }
+        const late = () => 1;
+        export { late };
+    ";
+    let st = SourceType::ts().with_module(true);
+    let ret = Parser::new(&allocator, src, st).with_options(ParseOptions::default()).parse();
+    let semantic = SemanticBuilder::new().with_build_nodes(true).build(&ret.program).semantic;
+    let result = extract_file(&ret.program, &semantic, src, FunctionKindsFilter::All);
+
+    let function = |name: &str| {
+        result
+            .functions
+            .iter()
+            .find(|function| function.name.as_deref() == Some(name))
+            .unwrap_or_else(|| panic!("no function named {name}"))
+    };
+
+    assert_eq!(function("record").kind, FunctionKind::Expression);
+    assert!(function("record").exported && function("record").is_generator);
+    assert_eq!(function("inner").parent.as_deref(), Some("record"));
+    assert_eq!(function("expression").kind, FunctionKind::Expression);
+    assert!(function("late").exported);
+
+    // Members are named like methods and are not module exports.
+    assert_eq!(function("up").kind, FunctionKind::ObjectMethod);
+    assert!(!function("up").exported);
+    assert_eq!(function("handler").kind, FunctionKind::ClassMethod);
+
+    // A callback passed to an ordinary call stays anonymous.
+    assert!(result.functions.iter().all(|function| function.name.as_deref() != Some("total")));
+    assert_eq!(result.functions.iter().filter(|function| function.name.is_none()).count(), 1);
+
+    let top_only = extract_file(&ret.program, &semantic, src, FunctionKindsFilter::Top);
+    assert_eq!(top_only.functions.len(), 0);
+
+    assert_eq!(result.line_count, 12);
+    assert!(result.exported_locals.contains("late"));
+}
