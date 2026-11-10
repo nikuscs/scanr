@@ -3,6 +3,8 @@ use clap::Parser;
 
 mod cli;
 mod commands;
+mod config;
+mod cycles;
 mod dependencies;
 mod git;
 mod rename;

@@ -209,25 +209,73 @@ register(class { ignored() {} });
 }
 
 #[test]
-fn type_declarations_carry_members_as_detail() {
+fn callable_type_members_are_structure_and_data_members_are_detail() {
     let extraction = outline(
         r"
 export enum Color { Red, 'Dark Green' = 2 }
 export interface Shape { area(): number; area(unit: string): number; side: number; [key: string]: unknown }
-type Point = { x: number; y: number };
+export interface EventsService {
+  readonly record: (event: Event) => Effect.Effect<void>;
+  readonly retention: Duration;
+}
+type Point = { x: number; y: number; distance: (to: Point) => number };
 type Alias = string;
 ",
     );
+    let symbols = &extraction.outline.symbols;
 
     assert_eq!(
-        shape(&extraction.outline.symbols),
+        shape(symbols),
         "Color enum\n  Red enumMember*\n  Dark Green enumMember*\nShape interface\n  \
-         area method*\n  side property*\nPoint type\n  x property*\n  y property*\nAlias type\n"
+         area method\n  side property*\nEventsService interface\n  record method\n  \
+         retention property*\nPoint type\n  x property*\n  y property*\n  distance method\n\
+         Alias type\n"
     );
     assert_eq!(
         shape(&extraction.outline.view(OutlineView::default()).symbols),
-        "Color enum\nShape interface\nPoint type\nAlias type\n"
+        "Color enum\nShape interface\n  area method\nEventsService interface\n  \
+         record method\nPoint type\n  distance method\nAlias type\n"
     );
+    assert_eq!(
+        find(symbols, "EventsService.record").signature.as_deref(),
+        Some("(event: Event) => Effect.Effect<void>")
+    );
+    assert!(find(symbols, "EventsService.record").function_position.is_none());
+}
+
+#[test]
+fn functions_handed_out_under_another_key_record_it() {
+    let extraction = outline(
+        r"
+const make = Effect.gen(function* () {
+  const webhooks = Effect.fn('webhooks')(function* () {});
+  const record = () => 1;
+  const deleteUser = () => 2;
+  const count = 3;
+  const options = { run: record };
+  schedule({ run: record });
+  return Store.of({ webhookList: webhooks, record, delete: deleteUser, total: count });
+});
+const helper = () => 1;
+export const factory = () => ({ assist: helper, helper, [dynamic]: helper });
+function build() {
+  const inner = () => 1;
+  return { outer: inner, nested: { deep: inner } };
+}
+",
+    );
+    let symbols = &extraction.outline.symbols;
+    let exposed = |path: &str| find(symbols, path).exposed_as.clone();
+
+    assert_eq!(exposed("make.webhooks"), ["webhookList"]);
+    assert_eq!(exposed("make.deleteUser"), ["delete"]);
+    // Shorthand keeps the name; options passed mid-body are not handed out.
+    assert_eq!(exposed("make.record"), [] as [&str; 0]);
+    // Only functions are tracked: `total: count` maps data.
+    assert_eq!(exposed("make.count"), [] as [&str; 0]);
+    // An arrow that returns an object reaches the declarations around it.
+    assert_eq!(exposed("helper"), ["assist"]);
+    assert_eq!(exposed("build.inner"), ["outer"]);
 }
 
 #[test]

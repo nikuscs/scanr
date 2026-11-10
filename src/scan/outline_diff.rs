@@ -53,6 +53,10 @@ pub struct Change {
     /// What changed on a symbol that stayed in place.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub details: Vec<String>,
+    /// A removal with nothing of the same kind added beside it: the name is
+    /// gone, with no candidate replacement.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub unreplaced: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -63,6 +67,36 @@ pub struct FileDiff {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from: Option<String>,
     pub changes: Vec<Change>,
+}
+
+/// Counts over a whole diff.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Totals {
+    pub files: usize,
+    pub added: usize,
+    pub removed: usize,
+    pub renamed: usize,
+    pub moved: usize,
+    pub changed: usize,
+    /// Removals with nothing of the same kind added beside them.
+    pub unreplaced: usize,
+}
+
+impl Totals {
+    pub fn of(files: &[FileDiff]) -> Self {
+        let mut totals = Self { files: files.len(), ..Self::default() };
+        for change in files.iter().flat_map(|file| &file.changes) {
+            match change.action {
+                ChangeKind::Added => totals.added += 1,
+                ChangeKind::Removed => totals.removed += 1,
+                ChangeKind::Renamed => totals.renamed += 1,
+                ChangeKind::Moved => totals.moved += 1,
+                ChangeKind::Changed => totals.changed += 1,
+            }
+            totals.unreplaced += usize::from(change.unreplaced);
+        }
+        totals
+    }
 }
 
 /// A subtree with no counterpart at its own position on the other side.
@@ -144,6 +178,7 @@ pub fn diff_outlines(files: &[FileVersions]) -> Vec<FileDiff> {
         .filter(|(file, changes)| file.status != FileStatus::Modified || !changes.is_empty())
         .map(|(file, mut changes)| {
             changes.sort_by(|a, b| (a.action, &a.symbol).cmp(&(b.action, &b.symbol)));
+            mark_unreplaced(&mut changes);
             FileDiff {
                 file: file.path.clone(),
                 status: file.status,
@@ -381,7 +416,22 @@ impl<'a> Differ<'a> {
             to,
             to_file,
             details,
+            unreplaced: false,
         });
+    }
+}
+
+/// Marks each removal that has no addition of the same kind in the same place.
+/// A removal with one beside it may be an unproven rename; one without is gone.
+fn mark_unreplaced(changes: &mut [Change]) {
+    let owner = |path: &str| path.rsplit_once('.').map_or("", |(owner, _)| owner).to_string();
+    let added: Vec<(String, SymbolKind)> = changes
+        .iter()
+        .filter(|change| change.action == ChangeKind::Added)
+        .map(|change| (owner(&change.symbol), change.kind))
+        .collect();
+    for change in changes.iter_mut().filter(|change| change.action == ChangeKind::Removed) {
+        change.unreplaced = !added.contains(&(owner(&change.symbol), change.kind));
     }
 }
 
@@ -419,7 +469,18 @@ fn differences(before: &Symbol, after: &Symbol) -> Vec<String> {
     if before.signature != after.signature
         && let (Some(old), Some(new)) = (&before.signature, &after.signature)
     {
+        let (old, new) = changed_part(old, new);
         details.push(format!("signature {old} → {new}"));
+    }
+    if before.exposed_as != after.exposed_as {
+        let keys = |keys: &[String]| {
+            if keys.is_empty() { "its own name".to_string() } else { keys.join(", ") }
+        };
+        details.push(format!(
+            "exposed as {} → {}",
+            keys(&before.exposed_as),
+            keys(&after.exposed_as)
+        ));
     }
     let name = |value: &Option<String>| value.clone().unwrap_or_else(|| "none".to_string());
     if before.via != after.via {
@@ -429,6 +490,51 @@ fn differences(before: &Symbol, after: &Symbol) -> Vec<String> {
         details.push(format!("extends {} → {}", name(&before.extends), name(&after.extends)));
     }
     details
+}
+
+/// Signatures longer than this are cut down to the part that changed.
+const WHOLE_SIGNATURE_LIMIT: usize = 60;
+
+/// The differing middle of two long signatures, widened to whole names and
+/// marked with `…` where text was cut. Short signatures are returned whole.
+fn changed_part(old: &str, new: &str) -> (String, String) {
+    let (old_chars, new_chars): (Vec<char>, Vec<char>) =
+        (old.chars().collect(), new.chars().collect());
+    if old_chars.len().max(new_chars.len()) <= WHOLE_SIGNATURE_LIMIT {
+        return (old.to_string(), new.to_string());
+    }
+    let shortest = old_chars.len().min(new_chars.len());
+    let mut prefix =
+        old_chars.iter().zip(&new_chars).take_while(|(left, right)| left == right).count();
+    let mut suffix = old_chars
+        .iter()
+        .rev()
+        .zip(new_chars.iter().rev())
+        .take(shortest - prefix)
+        .take_while(|(left, right)| left == right)
+        .count();
+    // Keep whole names: `AiGenerate` → `AiGenerateParams`, not `` → `Params`.
+    let in_name =
+        |character: char| character.is_alphanumeric() || matches!(character, '_' | '$' | '.');
+    while prefix > 0 && in_name(old_chars[prefix - 1]) {
+        prefix -= 1;
+    }
+    while suffix > 0 && in_name(old_chars[old_chars.len() - suffix]) {
+        suffix -= 1;
+    }
+    let cut = |chars: &[char]| {
+        let middle: String = chars[prefix..chars.len() - suffix].iter().collect();
+        if middle.trim().is_empty() {
+            return "…".to_string();
+        }
+        format!(
+            "{}{}{}",
+            if prefix > 0 { "…" } else { "" },
+            middle.trim(),
+            if suffix > 0 { "…" } else { "" }
+        )
+    };
+    (cut(&old_chars), cut(&new_chars))
 }
 
 fn join(prefix: &str, name: &str) -> String {

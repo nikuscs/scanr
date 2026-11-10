@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 
 use crate::cli::DepsArgs;
-use crate::dependencies::{DependencyGraph, FileDependencies};
+use crate::dependencies::{Cycles, DependencyGraph, FileDependencies};
 use crate::slop::{build_project_facts, collect_project_files};
 
 #[derive(Serialize)]
@@ -21,6 +21,7 @@ struct DepsFile<'a> {
 #[derive(Serialize)]
 struct DepsReport<'a> {
     version: u8,
+    cycles: Cycles,
     files: Vec<DepsFile<'a>>,
 }
 
@@ -29,15 +30,17 @@ pub fn run(args: &DepsArgs) -> Result<()> {
     let project = build_project_facts(&root, collect_project_files(&root)?)?;
     let graph = DependencyGraph::build(&project);
     let scope = args.path.as_deref().map(|path| path.trim_matches('/').to_string());
-    let report = DepsReport {
-        version: 1,
-        files: graph
+    let files = if args.cycles {
+        Vec::new()
+    } else {
+        graph
             .files
             .iter()
             .filter(|(file, _)| scope.as_deref().is_none_or(|scope| in_scope(file, scope)))
             .map(|(file, dependencies)| DepsFile { file, dependencies })
-            .collect(),
+            .collect()
     };
+    let report = DepsReport { version: 1, cycles: graph.cycles(), files };
 
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
@@ -45,7 +48,7 @@ pub fn run(args: &DepsArgs) -> Result<()> {
         serde_json::to_writer(&mut out, &report)?;
         writeln!(out)?;
     } else {
-        write!(out, "{}", render(&report))?;
+        write!(out, "{}", render(&report, args.cycles))?;
     }
     Ok(())
 }
@@ -56,9 +59,10 @@ fn in_scope(file: &str, scope: &str) -> bool {
         || file.strip_prefix(scope).is_some_and(|rest| rest.starts_with('/'))
 }
 
-fn render(report: &DepsReport<'_>) -> String {
+fn render(report: &DepsReport<'_>, cycles_only: bool) -> String {
     let mut out = String::from("# Dependencies\n");
-    if report.files.is_empty() {
+    out.push_str(&render_cycles(&report.cycles));
+    if report.files.is_empty() && !cycles_only {
         out.push_str("\nNo files in scope.\n");
     }
     for file in &report.files {
@@ -97,6 +101,22 @@ fn render(report: &DepsReport<'_>) -> String {
 
         let importers: Vec<String> = file.dependencies.imported_by.iter().cloned().collect();
         section(&mut out, "imported by", &importers);
+    }
+    out
+}
+
+/// Cycles come first: they concern the whole project, whatever the scope.
+fn render_cycles(cycles: &Cycles) -> String {
+    if cycles.is_empty() {
+        return "\nNo import cycles.\n".to_string();
+    }
+    let mut out = String::from("\nImport cycles (type-only imports and test files ignored)\n");
+    for (label, group) in [("packages", &cycles.packages), ("files", &cycles.files)] {
+        for cycle in group {
+            let mut path = cycle.clone();
+            path.extend(cycle.first().cloned());
+            out.push_str(&format!("  {label:<8}  {}\n", path.join(" → ")));
+        }
     }
     out
 }

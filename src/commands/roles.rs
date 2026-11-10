@@ -5,15 +5,18 @@
 //! imports. A trait shared by most of a role is usual; a file without it, or
 //! with a trait almost no sibling has, is an odd one out.
 
+mod check;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::Path;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 
 use crate::cli::RolesArgs;
 use crate::commands::tree::parse_project;
+use crate::config::Config;
 use crate::dependencies::{DependencyGraph, FileDependencies};
 use crate::scan::outline::FileOutline;
 use crate::scan::rules::is_test_path;
@@ -82,22 +85,12 @@ pub struct RolesReport {
 
 pub fn run(args: &RolesArgs) -> Result<()> {
     let root = Path::new(&args.root).canonicalize().context("Cannot resolve project root")?;
-    let (indices, similarity) = parse_project(&root, &root, true)?;
-    let project = build_project_facts(&root, similarity)?;
-    let graph = DependencyGraph::build(&project);
-
-    let files: Vec<RoleFile> = indices
-        .iter()
-        .filter(|index| !is_test_path(&index.path))
-        .map(|index| RoleFile {
-            path: index.path.clone(),
-            role: file_role(&index.path),
-            traits: file_traits(&index.outline, graph.files.get(&index.path)),
-        })
-        .collect();
+    if args.check {
+        return run_check(&root, args);
+    }
     let thresholds =
         Thresholds { min_files: args.min_files, usual: args.usual, unusual: args.unusual };
-    let report = build_report(&files, thresholds);
+    let report = build_report(&role_files(&root)?, thresholds);
 
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
@@ -108,6 +101,43 @@ pub fn run(args: &RolesArgs) -> Result<()> {
         write!(out, "{}", render(&report))?;
     }
     Ok(())
+}
+
+/// Prints the files that break their role's rules and fails when there are any.
+fn run_check(root: &Path, args: &RolesArgs) -> Result<()> {
+    let config = Config::load(root, args.config.as_deref())?;
+    check::validate_rules(&config.roles)?;
+    let report = check::check(&role_files(root)?, &config.roles);
+
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+    if args.json {
+        serde_json::to_writer(&mut out, &report)?;
+        writeln!(out)?;
+    } else {
+        write!(out, "{}", check::render(&report))?;
+    }
+    drop(out);
+    if report.violations.is_empty() {
+        return Ok(());
+    }
+    bail!("role rules are broken in {} of {} files", report.violations.len(), report.checked);
+}
+
+/// Every non-test file with its role and traits.
+fn role_files(root: &Path) -> Result<Vec<RoleFile>> {
+    let (indices, similarity) = parse_project(root, root, true)?;
+    let project = build_project_facts(root, similarity)?;
+    let graph = DependencyGraph::build(&project);
+    Ok(indices
+        .iter()
+        .filter(|index| !is_test_path(&index.path))
+        .map(|index| RoleFile {
+            path: index.path.clone(),
+            role: file_role(&index.path),
+            traits: file_traits(&index.outline, graph.files.get(&index.path)),
+        })
+        .collect())
 }
 
 /// `events.layer.ts` → `.layer`, `index.ts` → `index`, `events.ts` → `(no suffix)`.

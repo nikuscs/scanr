@@ -176,7 +176,58 @@ fn file_level_changes_are_kept_and_untouched_files_dropped() {
         serde_json::to_value(&diff[0]).unwrap(),
         serde_json::json!({
             "file": "gone.ts", "status": "deleted",
-            "changes": [{ "change": "removed", "symbol": "dead", "kind": "const" }]
+            "changes": [{ "change": "removed", "symbol": "dead", "kind": "const", "unreplaced": true }]
         })
     );
+}
+
+#[test]
+fn totals_count_changes_and_removals_with_nothing_beside_them() {
+    let files = [modified(
+        "a.ts",
+        "type OldParams = string;\nconst make = () => {\n  const legacy = () => 1;\n  const list = (id: string) => 2;\n};\nconst gone = 1;\n",
+        "type NewParams = string;\nconst make = () => {\n  const listAll = (page: number) => 2;\n};\n",
+    )];
+    let diff = diff_outlines(&files);
+
+    let unreplaced: Vec<_> = diff[0]
+        .changes
+        .iter()
+        .filter(|change| change.unreplaced)
+        .map(|change| change.symbol.as_str())
+        .collect();
+    // `OldParams` and one of make's functions have a same-kind addition beside
+    // them; a top-level const does not.
+    assert_eq!(unreplaced, ["gone"]);
+    assert_eq!(
+        Totals::of(&diff),
+        Totals { files: 1, added: 2, removed: 4, renamed: 0, moved: 0, changed: 0, unreplaced: 1 }
+    );
+}
+
+#[test]
+fn long_signatures_show_only_the_names_that_changed() {
+    let short = changed_part("(id: string)", "(id: string, force: boolean)");
+    assert_eq!(short, ("(id: string)".to_string(), "(id: string, force: boolean)".to_string()));
+
+    let (old, new) = changed_part(
+        "<A, I extends Schema.JsonObject, RD>({ subject, prompt, plan }: AiTypes.AiGenerateObject<A, I, RD>)",
+        "<A, I extends Schema.JsonObject, RD>({ subject, prompt, plan }: AiTypes.AiGenerateObjectParams<A, I, RD>)",
+    );
+    assert_eq!(
+        (old.as_str(), new.as_str()),
+        ("…AiTypes.AiGenerateObject…", "…AiTypes.AiGenerateObjectParams…")
+    );
+
+    let (old, new) = changed_part(
+        "({ page, limit, ...filter }: ActivityLogTypes.ActivityLogListParams): Effect.Effect<Page>",
+        "({ page, limit, cursor, ...filter }: ActivityLogTypes.ActivityLogListParams): Effect.Effect<Page>",
+    );
+    assert_eq!((old.as_str(), new.as_str()), ("…...filter…", "…cursor, ...filter…"));
+
+    let (old, new) = changed_part(
+        "(params: ActivityLogTypes.ActivityLogListParams, options: ActivityLogTypes.Options)",
+        "(input: ActivityLogTypes.ActivityLogListParams, options: ActivityLogTypes.Options)",
+    );
+    assert_eq!((old.as_str(), new.as_str()), ("…params…", "…input…"));
 }

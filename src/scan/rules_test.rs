@@ -469,3 +469,27 @@ fn one_exported_function_path_prefix_can_skip_file() {
     let rule = OneExportedFunctionPerFile { path_prefix: Some("other/".into()) };
     assert!(rule.check(&fi).is_none());
 }
+
+#[test]
+fn aliased_member_lists_functions_handed_out_under_another_key() {
+    use crate::scan::outline::{FileOutline, Symbol, SymbolKind};
+
+    let mut webhooks = Symbol::new("webhooks".into(), SymbolKind::Function, 2, 3);
+    webhooks.exposed_as = vec!["webhookList".into()];
+    let record = Symbol::new("record".into(), SymbolKind::Function, 4, 5);
+    let mut make = Symbol::new("make".into(), SymbolKind::Const, 1, 9);
+    make.children = vec![webhooks, record];
+    let outline = FileOutline { symbols: vec![make], ..FileOutline::default() };
+
+    let mut fi = mk_fi("src/store.layer.ts", &[], false);
+    fi.outline = outline.clone();
+    run_rules(&["aliased_member".into()], &mut fi);
+    assert_eq!(fi.violations.len(), 1);
+    assert_eq!(fi.violations[0].count, 1);
+    assert_eq!(fi.violations[0].details, ["make.webhooks:webhookList"]);
+
+    let mut test_file = mk_fi("src/store.test.ts", &[], false);
+    test_file.outline = outline;
+    run_rules(&["aliased_member".into()], &mut test_file);
+    assert_eq!(test_file.violations.len(), 0);
+}

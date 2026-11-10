@@ -30,8 +30,13 @@ fn renders_files_packages_unresolved_and_importers() {
         imported_by: BTreeSet::from(["src/index.ts".to_string()]),
     };
     let leaf = FileDependencies::default();
+    let cycles = Cycles {
+        files: vec![vec!["src/a.ts".to_string(), "src/b.ts".to_string()]],
+        packages: vec![vec!["kit-a".to_string(), "kit-b".to_string()]],
+    };
     let report = DepsReport {
         version: 1,
+        cycles,
         files: vec![
             DepsFile { file: "src/a.ts", dependencies: &dependencies },
             DepsFile { file: "src/leaf.ts", dependencies: &leaf },
@@ -39,9 +44,13 @@ fn renders_files_packages_unresolved_and_importers() {
     };
 
     assert_eq!(
-        render(&report),
+        render(&report, false),
         "\
 # Dependencies
+
+Import cycles (type-only imports and test files ignored)
+  packages  kit-a → kit-b → kit-a
+  files     src/a.ts → src/b.ts → src/a.ts
 
 src/a.ts
   imports
@@ -58,6 +67,14 @@ src/leaf.ts
     let json = serde_json::to_value(&report).unwrap();
     assert_eq!(json["files"][0]["file"], "src/a.ts");
     assert_eq!(json["files"][0]["importedBy"], serde_json::json!(["src/index.ts"]));
+    assert_eq!(json["cycles"]["files"], serde_json::json!([["src/a.ts", "src/b.ts"]]));
+
+    let clean = DepsReport { version: 1, cycles: Cycles::default(), files: Vec::new() };
+    assert_eq!(render(&clean, true), "# Dependencies\n\nNo import cycles.\n");
+    assert_eq!(
+        render(&clean, false),
+        "# Dependencies\n\nNo import cycles.\n\nNo files in scope.\n"
+    );
 }
 
 #[test]

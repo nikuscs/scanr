@@ -12,15 +12,16 @@ Pick the command by the question, then read its section:
 | --- | --- |
 | What is in this repo? | `scanr xray` |
 | What does each file declare, and what lives inside what? | `scanr scan --mode outline`, or `scanr tree --outline` for a human |
-| Do these files follow the architecture? | `scanr roles` |
+| Do these files follow the architecture? | `scanr roles`; `scanr roles --check` when the repo has a `scanr.json` |
 | What does this file import, and what imports it? | `scanr deps --path <file-or-dir>` |
+| Are there import cycles? | `scanr deps --cycles` |
 | What did this refactor change? | `scanr diff --base <ref>` |
 | Which constants, types, functions or exports exist? | `scanr scan --mode inventory` |
 | Where is this name used? | `scanr refs <name>` |
 | Rename a symbol everywhere | `scanr rename <Name> <NewName>` |
 | Which code is duplicated or low value? | `scanr dupes`, `scanr slop` |
 
-Every command takes `--root <path>`. `xray`, `tree`, `roles`, `deps` and `diff` print text; return it as printed. Add `--json` when you need to filter the result.
+Every command takes `--root <path>`. `xray`, `tree`, `roles`, `deps` and `diff` print text; return it as printed. Read the whole output: it is ordered so the answer comes first. Add `--json` and process it with a script when it is long.
 
 ## Xray a project
 
@@ -41,11 +42,13 @@ scanr scan --mode outline --root <path>          # JSON for you
 scanr tree --outline --root <path> --path <dir>  # tree for a human
 ```
 
-`scanr scan --mode outline --schema` prints the field layout. Each file lists its `symbols` as a tree: `{name, kind, line, endLine}` plus `via` (the callee that produced it, such as `Effect.fn`), `extends`, `exported`, `exportedAs`, and `children`. `reexports` rows carry `from` and either `names` or `all`. A declaration inside an anonymous callback belongs to the nearest named declaration around it, so `record` sits under `make` in `const make = Effect.gen(function* () { const record = … })`.
+`scanr scan --mode outline --schema` prints the field layout. Each file lists its `symbols` as a tree: `{name, kind, line, endLine}` plus `via` (the callee that produced it, such as `Effect.fn`), `extends`, `exported`, `exportedAs`, `exposedAs`, and `children`. `reexports` rows carry `from` and either `names` or `all`. A declaration inside an anonymous callback belongs to the nearest named declaration around it, so `record` sits under `make` in `const make = Effect.gen(function* () { const record = … })`.
 
 A variable is a `function` only when assigned an arrow, a function expression, or a recognized wrapper (`Effect.fn`, `Effect.fnUntraced`, `memo`, `forwardRef`, `useCallback`, `cache`, `debounce`, `throttle`, `memoize`, `once`, `observer`). Any other call result is a `const` with `via`; read `via` to judge it.
 
-Default output is declarations and functions. `--deep` adds locals, properties, type and enum members, and imports. `--signatures` adds each callable's parameters and return type. `--exported` keeps only exported symbols and re-exports, the public surface. In the tree, indentation means "lives inside" and `()` marks a function; return it as printed.
+`exposedAs` marks a function handed out under another key: `webhooks` in `Store.of({ webhookList: webhooks })`. `scanr scan --rules aliased_member` lists them all as `path:key`; each is a naming leftover unless the key is a reserved word such as `delete`.
+
+Default output is declarations, functions and callable members, methods on interfaces included. `--deep` adds locals, data properties, enum members, and imports. `--signatures` adds each callable's parameters and return type. `--exported` keeps only exported symbols and re-exports, the public surface. In the tree, indentation means "lives inside" and `()` marks a function; return it as printed.
 
 ## Check a folder follows its architecture
 
@@ -54,6 +57,8 @@ scanr roles --root <path>
 ```
 
 Groups files by name suffix (`*.layer.ts` is `.layer`) and lists, per role, what its files usually have and the files that differ: `missing` a usual trait, or carrying an `unusual` one such as `imports .fake (1 of 18)`. Each odd one out is a question to check against the project's rules. `--min-files`, `--usual`, and `--unusual` tune the thresholds.
+
+When the repo has a `scanr.json`, `scanr roles --check` holds every file to its role's `require` and `forbid` traits and exits `1` on a break. Run it after adding or moving a file. Traits in that file are written exactly as `scanr roles` prints them.
 
 `--json`: `{roles: [{role, files, usual: [{trait, files}], outliers: [{file, missing, unusual: [{trait, files}]}]}], smallRoles: [{role, files}]}`. `smallRoles` are suffixes with too few files to compare; a one-off suffix can itself be drift.
 
@@ -65,9 +70,9 @@ Before moving, splitting, or deleting a file:
 scanr deps --root <path> --path <file-or-dir>
 ```
 
-Lists resolved project imports (`(type)` when type-only), packages, unresolved relative imports, and `imported by`. Importers come from the whole root, tests included.
+Starts with the import cycles of the whole root, between files and between workspace packages, or `No import cycles.`; `--cycles` prints only that. Then lists resolved project imports (`(type)` when type-only), packages, unresolved relative imports, and `imported by`. Importers come from the whole root, tests included.
 
-`--json`: `{files: [{file, imports: [{source, file?, package?, typeOnly?}], importedBy}]}`. An import with neither `file` nor `package` is unresolved.
+`--json`: `{cycles: {files, packages}, files: [{file, imports: [{source, file?, package?, typeOnly?}], importedBy}]}`. An import with neither `file` nor `package` is unresolved.
 
 ## Review a refactor by its structure
 
@@ -75,9 +80,9 @@ Lists resolved project imports (`(type)` when type-only), packages, unresolved r
 scanr diff --base <ref> --root <path>
 ```
 
-Compares the working tree's outlines with `<ref>`: `+` added, `-` removed, `>` moved (with the destination file), `~` renamed or changed (signature, exported, kind, producer). A rename is claimed only with evidence (same signature, members or producer), so an unproven one shows as one removal and one addition. Run it after a refactor to confirm nothing was dropped or left behind. `--deep` includes locals.
+Compares the working tree with `<ref>`. The first lines give the totals and every removal with nothing of the same kind added beside it; those are the names that are gone. Then, per file: `+` added, `-` removed, `>` moved (with the destination file), `~` renamed or changed (signature, exported, kind, producer). A rename is claimed only with evidence (same signature, members or producer), so an unproven one shows as one removal and one addition. Run it after a refactor to confirm nothing was dropped or left behind. Methods on interfaces are always compared; `--deep` adds locals, data properties and enum members.
 
-`--json`: `{base, resolvedBase, files: [{file, status, from?, changes: [{change, symbol, kind, to?, toFile?, details?}]}]}`. `status` is `added`, `deleted`, `modified` or `renamed`; `change` is `added`, `removed`, `renamed`, `moved` or `changed`.
+`--json`: `{base, resolvedBase, totals: {files, added, removed, renamed, moved, changed, unreplaced}, files: [{file, status, from?, changes: [{change, symbol, kind, to?, toFile?, details?, unreplaced?}]}]}`. `status` is `added`, `deleted`, `modified` or `renamed`; `change` is `added`, `removed`, `renamed`, `moved` or `changed`.
 
 ## List names
 

@@ -131,3 +131,26 @@ fn lists_unscanned_files_and_skips_tests_by_default() {
     assert!(shallow.contains("deep/ (1d 1f)"), "output: {shallow}");
     assert!(!shallow.contains("b.ts"), "output: {shallow}");
 }
+
+#[test]
+fn shows_interface_methods_and_functions_exposed_under_another_key() {
+    let output = render(
+        &[(
+            "store.layer.ts",
+            "interface Store { webhookList: () => void; size: number }\nconst make = () => {\n  const webhooks = () => {};\n  return Store.of({ webhookList: webhooks });\n};\n",
+        )],
+        false,
+        false,
+        6,
+    );
+
+    assert_eq!(
+        output,
+        "\
+└── store.layer.ts
+    ├── Store              interface               (line 1)
+    │   └── webhookList()                          (line 1)
+    └── make()                                     (line 2)
+        └── webhooks()     exposed as webhookList  (line 3)"
+    );
+}

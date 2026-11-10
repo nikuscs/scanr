@@ -10,10 +10,10 @@ use oxc::ast::ast::{
     ExportAllDeclaration, ExportDeclaration, ExportDefaultDeclaration, ExportFromDeclaration,
     ExportNamedDeclaration, Expression, Function, FunctionType, ImportDeclaration,
     ImportDeclarationSpecifier, MethodDefinition, MethodDefinitionKind, ObjectExpression,
-    ObjectProperty, Program, PropertyDefinition, PropertyKey, PropertyKind, StaticBlock,
-    TSEnumDeclaration, TSExternalModuleDeclaration, TSGlobalDeclaration, TSInterfaceDeclaration,
-    TSNamespaceDeclaration, TSSignature, TSType, TSTypeAliasDeclaration, VariableDeclaration,
-    VariableDeclarationKind, VariableDeclarator,
+    ObjectProperty, ObjectPropertyKind, Program, PropertyDefinition, PropertyKey, PropertyKind,
+    ReturnStatement, StaticBlock, TSEnumDeclaration, TSExternalModuleDeclaration,
+    TSGlobalDeclaration, TSInterfaceDeclaration, TSNamespaceDeclaration, TSSignature, TSType,
+    TSTypeAliasDeclaration, VariableDeclaration, VariableDeclarationKind, VariableDeclarator,
 };
 use oxc::ast_visit::{self, Visit};
 use oxc::span::Span;
@@ -61,6 +61,7 @@ pub fn build_outline(program: &Program<'_>, source: &str, lines: &LineIndex) -> 
         variable_kind: SymbolKind::Const,
         export_mark: None,
         owned_objects: HashSet::new(),
+        handed_out_objects: HashSet::new(),
         owned_classes: HashSet::new(),
         object_owned: Vec::new(),
         class_owned: Vec::new(),
@@ -105,6 +106,9 @@ struct OutlineBuilder<'s> {
     export_mark: Option<ExportMark>,
     /// Span starts of object literals and class expressions whose members are symbols.
     owned_objects: HashSet<u32>,
+    /// Span starts of object literals a function hands out: its return value, or
+    /// the argument of a service constructor such as `Store.of({ ... })`.
+    handed_out_objects: HashSet<u32>,
     owned_classes: HashSet<u32>,
     /// Whether the object literal or class being walked owns member symbols.
     object_owned: Vec<bool>,
@@ -233,13 +237,54 @@ impl OutlineBuilder<'_> {
         }
     }
 
+    fn hand_out(&mut self, expression: &Expression<'_>) {
+        if let Expression::ObjectExpression(object) = expression.get_inner_expression() {
+            self.handed_out_objects.insert(object.span.start);
+        }
+    }
+
+    /// Records `key` on the nearest function named `local`, searching the
+    /// enclosing declarations from the inside out.
+    fn expose(&mut self, local: &str, key: &str) {
+        let scopes = self
+            .frames
+            .iter_mut()
+            .rev()
+            .map(|frame| &mut frame.symbol.children)
+            .chain(std::iter::once(&mut self.roots));
+        for scope in scopes {
+            let Some(symbol) = scope.iter_mut().rev().find(|symbol| symbol.name == local) else {
+                continue;
+            };
+            if symbol.kind.is_callable() && !symbol.exposed_as.iter().any(|name| name == key) {
+                symbol.exposed_as.push(key.to_string());
+            }
+            return;
+        }
+    }
+
+    /// Members of an interface or type literal. A member that can be called,
+    /// written as a method or as a property with a function type, is part of
+    /// the declaration's structure; data properties are detail.
     fn signature_members(&self, signatures: &[TSSignature<'_>]) -> Vec<Symbol> {
         signatures
             .iter()
             .filter_map(|signature| {
                 let (key, kind, span, signature) = match signature {
                     TSSignature::TSPropertySignature(property) if !property.computed => {
-                        (&property.key, SymbolKind::Property, property.span, None)
+                        let function_type =
+                            property.type_annotation.as_deref().and_then(|annotation| {
+                                match &annotation.type_annotation {
+                                    TSType::TSFunctionType(function) => Some(function.span),
+                                    _ => None,
+                                }
+                            });
+                        let kind = if function_type.is_some() {
+                            SymbolKind::Method
+                        } else {
+                            SymbolKind::Property
+                        };
+                        (&property.key, kind, property.span, function_type)
                     }
                     TSSignature::TSMethodSignature(method) if !method.computed => {
                         let signature = signature_span(
@@ -253,7 +298,7 @@ impl OutlineBuilder<'_> {
                 };
                 let mut symbol = self.symbol(Self::member_name(key)?, kind, span);
                 symbol.signature = signature.map(|span| self.signature(span));
-                symbol.detail = true;
+                symbol.detail = kind == SymbolKind::Property;
                 Some(symbol)
             })
             .fold(Vec::new(), |mut members: Vec<Symbol>, member| {
@@ -510,6 +555,10 @@ impl<'a> Visit<'a> for OutlineBuilder<'_> {
     }
 
     fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
+        // `() => ({ ... })` returns the object.
+        if let Some(returned) = it.body.as_expression() {
+            self.hand_out(returned);
+        }
         self.function_scope(|builder| {
             ast_visit::walk::walk_arrow_function_expression(builder, it);
         });
@@ -606,7 +655,39 @@ impl<'a> Visit<'a> for OutlineBuilder<'_> {
         self.close();
     }
 
+    fn visit_return_statement(&mut self, it: &ReturnStatement<'a>) {
+        if let Some(argument) = &it.argument {
+            self.hand_out(argument);
+        }
+        ast_visit::walk::walk_return_statement(self, it);
+    }
+
+    fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
+        // `Service.of({ ... })` builds a service from its members.
+        if let Expression::StaticMemberExpression(member) = it.callee.get_inner_expression()
+            && member.property.name == "of"
+            && let [argument] = it.arguments.as_slice()
+            && let Some(argument) = argument.as_expression()
+        {
+            self.hand_out(argument);
+        }
+        ast_visit::walk::walk_call_expression(self, it);
+    }
+
     fn visit_object_expression(&mut self, it: &ObjectExpression<'a>) {
+        if self.handed_out_objects.remove(&it.span.start) {
+            for property in &it.properties {
+                if let ObjectPropertyKind::ObjectProperty(property) = property
+                    && !property.computed
+                    && !property.shorthand
+                    && let Some(key) = Self::member_name(&property.key)
+                    && let Expression::Identifier(local) = property.value.get_inner_expression()
+                    && local.name != key.as_str()
+                {
+                    self.expose(local.name.as_str(), &key);
+                }
+            }
+        }
         let owned = self.owned_objects.remove(&it.span.start);
         self.object_owned.push(owned);
         ast_visit::walk::walk_object_expression(self, it);

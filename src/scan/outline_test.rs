@@ -6,7 +6,7 @@ fn symbol(name: &str, kind: SymbolKind, detail: bool, children: Vec<Symbol>) -> 
 
 fn paths(outline: &FileOutline) -> Vec<String> {
     let mut paths = Vec::new();
-    outline.walk(&mut |_, path| paths.push(path.to_string()));
+    outline.walk(&mut |_, path, _| paths.push(path.to_string()));
     paths
 }
 

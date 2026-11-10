@@ -195,6 +195,9 @@ fn symbol_tags(symbol: &Symbol, deep: bool) -> String {
             format!("exported as {}", symbol.exported_as.join(", "))
         });
     }
+    if !symbol.exposed_as.is_empty() {
+        tags.push(format!("exposed as {}", symbol.exposed_as.join(", ")));
+    }
     tags.join("  ")
 }
 

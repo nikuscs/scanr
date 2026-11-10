@@ -118,14 +118,14 @@ pub fn write_schema<W: Write>(mode: OutputMode, w: &mut W) -> anyhow::Result<()>
             "ver": 1,
             "fields": {
                 "files": ["file", "lines", "symbols", "reexports?", "imports?"],
-                "symbols": ["name", "kind", "via?", "signature?", "extends?", "exported?", "exportedAs?", "line", "endLine", "children?"],
+                "symbols": ["name", "kind", "via?", "signature?", "extends?", "exported?", "exportedAs?", "exposedAs?", "line", "endLine", "children?"],
                 "reexports": ["from", "names?", "all?", "namespace?", "typeOnly?"]
             },
             "symbol_kinds": [
                 "function", "const", "let", "var", "class", "method", "getter", "setter",
                 "constructor", "property", "interface", "type", "enum", "enumMember", "namespace"
             ],
-            "deep_only": ["locals", "properties", "type and enum members", "imports"],
+            "deep_only": ["locals", "data properties", "enum members", "imports"],
             "flags": {
                 "--deep": "add the deep_only symbols",
                 "--signatures": "add signature to callables",

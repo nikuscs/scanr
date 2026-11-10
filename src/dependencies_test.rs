@@ -88,3 +88,47 @@ fn package_names_keep_their_scope() {
     assert_eq!(package_name("@scope/name/sub/path"), "@scope/name");
     assert_eq!(package_name("node:fs"), "node:fs");
 }
+
+#[test]
+fn cycles_cover_files_and_workspace_packages_but_not_types_or_tests() {
+    let graph = graph(&[
+        ("packages/a/package.json", r#"{ "name": "@scope/a" }"#),
+        ("packages/b/package.json", r#"{ "name": "@scope/b" }"#),
+        ("packages/c/package.json", r#"{ "name": "@scope/c" }"#),
+        // a → b by package name, b → a by relative path: a package cycle.
+        ("packages/a/src/index.ts", "import { b } from '@scope/b';\nexport const a = b;\n"),
+        (
+            "packages/b/src/index.ts",
+            "import { a } from '../../a/src/index.ts';\nexport const b = a;\n",
+        ),
+        // A file cycle inside one package.
+        ("packages/c/src/one.ts", "import { two } from './two';\nexport const one = two;\n"),
+        ("packages/c/src/two.ts", "import { one } from './one';\nexport const two = one;\n"),
+        // Type-only and test imports do not close a loop.
+        (
+            "packages/c/src/model.ts",
+            "import type { View } from './view';\nexport const model = {} as View;\n",
+        ),
+        (
+            "packages/c/src/view.ts",
+            "import { model } from './model';\nexport type View = typeof model;\n",
+        ),
+        ("packages/c/test/one.test.ts", "import { a } from '@scope/a';\nexpect(a);\n"),
+        (
+            "packages/a/src/helper.ts",
+            "import { one } from '@scope/c';\nexport const helper = one;\n",
+        ),
+    ]);
+
+    assert_eq!(
+        graph.cycles(),
+        Cycles {
+            // `@scope/b` is not resolved to a file, so a ↔ b is a package cycle only.
+            files: vec![vec![
+                "packages/c/src/one.ts".to_string(),
+                "packages/c/src/two.ts".to_string(),
+            ]],
+            packages: vec![vec!["@scope/a".to_string(), "@scope/b".to_string()]],
+        }
+    );
+}

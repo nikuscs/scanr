@@ -4,25 +4,56 @@ use clap::{Parser, Subcommand};
 #[command(
     name = "scanr",
     version,
-    about = "Static analysis and search for TypeScript and JavaScript"
+    about = "Static analysis and search for TypeScript and JavaScript",
+    after_help = WHICH_COMMAND
 )]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 }
 
+const WHICH_COMMAND: &str = "\
+Which command answers what:
+  What is in this repo?                          scanr xray
+  What does each file declare, and what nests?   scanr tree --outline   (JSON: scanr scan --mode outline)
+  Do the files follow their pattern?             scanr roles            (enforce: scanr roles --check)
+  What imports this file? Any import cycles?     scanr deps --path <file>, scanr deps --cycles
+  What did this change do to the declarations?   scanr diff --base <ref>
+  Which names exist?                             scanr scan --mode inventory
+  Where is this name used?                       scanr refs <name>
+
+Read the whole output: it is ordered so the answer comes first. Add --json to filter it.";
+
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Resolved imports per file: what each file depends on and what depends on it
+    /// Resolved imports per file, what imports each file, and import cycles
     Deps(DepsArgs),
 
     /// Declarations added, removed, renamed, moved, or changed since a Git base
+    #[command(after_help = "\
+The output starts with the totals and every removal that has nothing of the same
+kind added beside it: read those lines to know whether a name was lost.
+
+Rows: + added, - removed, > moved (with the destination file), ~ renamed or changed.
+A rename is claimed only with evidence (same signature, members, or producer);
+otherwise it shows as one removal and one addition.
+
+Functions, classes, types, and methods on interfaces are always compared.
+--deep adds locals inside functions, data properties, and enum members.")]
     Diff(DiffArgs),
 
     /// Find duplicate and similar functions and types
     Dupes(DupesArgs),
 
     /// Group files by name suffix and list the ones that break their group's pattern
+    #[command(after_help = "\
+A role is the suffix before the extension: events.layer.ts is `.layer`.
+Each odd one out is a question to check against the project's rules.
+
+To enforce rules, write scanr.json at the root and run `scanr roles --check`:
+  { \"roles\": { \".utils\": { \"forbid\": [\"imports .layer\"] },
+               \".layer\": { \"require\": [\"exported `layer`\"] } } }
+Traits are written exactly as this command prints them. --check exits 1 on a break.")]
     Roles(RolesArgs),
 
     /// Report deterministic, evidence-backed code-slop review signals
@@ -188,7 +219,7 @@ pub struct TreeArgs {
     #[arg(long, conflicts_with_all = ["functions", "health"])]
     pub outline: bool,
 
-    /// Add locals, properties, type and enum members, and imports to --outline
+    /// Add locals, data properties, enum members, and imports to --outline
     #[arg(long, requires = "outline")]
     pub deep: bool,
 
@@ -241,6 +272,10 @@ pub struct DepsArgs {
     #[arg(long)]
     pub path: Option<String>,
 
+    /// Show only the import cycles between files and between workspace packages
+    #[arg(long, conflicts_with = "path")]
+    pub cycles: bool,
+
     /// Emit structured JSON instead of text
     #[arg(long)]
     pub json: bool,
@@ -256,7 +291,7 @@ pub struct DiffArgs {
     #[arg(long, default_value = ".")]
     pub root: String,
 
-    /// Also compare locals, properties, and type and enum members
+    /// Also compare locals, data properties, and enum members
     #[arg(long)]
     pub deep: bool,
 
@@ -282,6 +317,14 @@ pub struct RolesArgs {
     /// Percent of a role's files at or below which a trait is unusual
     #[arg(long, default_value_t = 10, value_parser = clap::value_parser!(u8).range(0..=100))]
     pub unusual: u8,
+
+    /// Hold each file to its role's `require` and `forbid` traits in scanr.json; fail on a break
+    #[arg(long)]
+    pub check: bool,
+
+    /// Config file for --check (default: <root>/scanr.json)
+    #[arg(long, requires = "check")]
+    pub config: Option<String>,
 
     /// Emit structured JSON instead of text
     #[arg(long)]
@@ -432,7 +475,7 @@ pub struct ScanArgs {
     #[arg(long)]
     pub lines: bool,
 
-    /// Add locals, properties, type and enum members, and imports to --mode outline
+    /// Add locals, data properties, enum members, and imports to --mode outline
     #[arg(long)]
     pub deep: bool,
 
@@ -589,6 +632,23 @@ mod tests {
             panic!("expected roles command");
         };
         assert_eq!((args.min_files, args.usual, args.unusual), (3, 90, 10));
+        assert!(!args.check);
+
+        let cli =
+            Cli::try_parse_from(["scanr", "roles", "--check", "--config", "rules.json"]).unwrap();
+        let Commands::Roles(args) = cli.command else {
+            panic!("expected roles command");
+        };
+        assert!(args.check);
+        assert_eq!(args.config.as_deref(), Some("rules.json"));
+        assert!(Cli::try_parse_from(["scanr", "roles", "--config", "rules.json"]).is_err());
+
+        let cli = Cli::try_parse_from(["scanr", "deps", "--cycles"]).unwrap();
+        let Commands::Deps(args) = cli.command else {
+            panic!("expected deps command");
+        };
+        assert!(args.cycles);
+        assert!(Cli::try_parse_from(["scanr", "deps", "--cycles", "--path", "src"]).is_err());
         assert!(Cli::try_parse_from(["scanr", "roles", "--usual", "0"]).is_err());
     }
 

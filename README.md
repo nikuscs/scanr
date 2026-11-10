@@ -109,13 +109,15 @@ scanr scan --mode folders
 scanr scan --rules hoistable_nested_function
 ```
 
-`--mode outline` emits `{files:[{file,lines,symbols,reexports}]}`: each file's declarations as a tree. A symbol is `{name,kind,line,endLine}` plus `via` (the callee that produced it, such as `Effect.fn` or `new Map`), `extends`, `exported`, `exportedAs` (public names that differ from `name`, such as `default`), and `children`. Kinds are `function`, `const`, `let`, `var`, `class`, `method`, `getter`, `setter`, `constructor`, `property`, `interface`, `type`, `enum`, `enumMember`, and `namespace`. `reexports` rows are `{from,names}`, `{from,all}` for `export *`, and `{from,all,namespace}` for `export * as`.
+`--mode outline` emits `{files:[{file,lines,symbols,reexports}]}`: each file's declarations as a tree. A symbol is `{name,kind,line,endLine}` plus `via` (the callee that produced it, such as `Effect.fn` or `new Map`), `extends`, `exported`, `exportedAs` (public names that differ from `name`, such as `default`), `exposedAs`, and `children`. Kinds are `function`, `const`, `let`, `var`, `class`, `method`, `getter`, `setter`, `constructor`, `property`, `interface`, `type`, `enum`, `enumMember`, and `namespace`. `reexports` rows are `{from,names}`, `{from,all}` for `export *`, and `{from,all,namespace}` for `export * as`.
 
-Nesting follows ownership. Anonymous callbacks are transparent, so a declaration inside one belongs to the nearest named declaration around it: `record` sits under `make` in `const make = Effect.gen(function* () { const record = … })`. Members come from classes, from object literals assigned directly to a declaration, and from interfaces, type literals, and enums. Overload signatures collapse into one function.
+Nesting follows ownership. Anonymous callbacks are transparent, so a declaration inside one belongs to the nearest named declaration around it: `record` sits under `make` in `const make = Effect.gen(function* () { const record = … })`. Members come from classes, from object literals assigned directly to a declaration, and from interfaces, type literals, and enums. A member of an interface or type literal that can be called, written as a method or as a property with a function type, is a `method`; the rest are `property`. Overload signatures collapse into one function.
+
+`exposedAs` lists the keys a function is handed out under when they differ from its name: `webhooks` gets `exposedAs: ["webhookList"]` from `Store.of({ webhookList: webhooks })`. It is read from the object a function returns and from the single argument of a `.of(...)` call. The `aliased_member` rule lists every such function as `path:key`.
 
 A variable is a `function` when it is assigned an arrow or function expression, or the result of a recognized wrapper whose first argument is one: `Effect.fn`, `Effect.fnUntraced`, `cache`, `debounce`, `forwardRef`, `memo`, `memoize`, `observer`, `once`, `throttle`, and `useCallback` (a bare name also matches as the last segment, so `React.memo` counts). Syntax cannot tell `memo(fn)` from `items.map(fn)`, so every other call result stays a variable and carries its callee in `via`.
 
-By default the outline holds declarations and functions. `--deep` adds locals inside function bodies, properties, interface, type, and enum members, and each file's `imports`. `--signatures` adds `signature` to callables: the type parameters, parameters, and return type as written, on one line (`(id: string): User`). `--exported` keeps only each file's public surface: exported symbols and re-exports.
+By default the outline holds declarations, functions, and callable members. `--deep` adds locals inside function bodies, data properties, enum members, and each file's `imports`. `--signatures` adds `signature` to callables: the type parameters, parameters, and return type as written, on one line (`(id: string): User`). `--exported` keeps only each file's public surface: exported symbols and re-exports.
 
 `--mode inventory` flattens the outline into `{functions,constants,variables,types,components,hooks,classes,enums,namespaces,exports}` as `{file,name}` rows (add `--lines` for `line`). Names are dotted paths through the enclosing declarations, such as `make.record` or `Service.run`. Constant `kind` is `primitive` or `arrow` (`const Foo = () => {}` is `arrow` and also appears under `functions`); `variables` are `let` or `var`. Types are `interface` or `type`. `components` / `hooks` are the React role subset of functions (`.tsx` + JSX + Uppercase for components; `useX` for hooks). `exports` lists each public name once, and re-exported names carry `from` (`*` for `export * from`).
 
@@ -124,7 +126,7 @@ Flags:
 - `--root <path>` — project root
 - `--mode compact|verbose|files|folders|inventory|outline` — output shape
 - `--lines` — include source line numbers in `--mode inventory`
-- `--deep` — add locals, properties, type and enum members, and imports to `--mode outline`
+- `--deep` — add locals, data properties, enum members, and imports to `--mode outline`
 - `--signatures` — add parameters and return types to callables in `--mode outline`
 - `--exported` — keep only exported symbols and re-exports in `--mode outline`
 - `--include ts,tsx,js,jsx,...` — included extensions (default `ts,tsx,mts,cts,js,jsx,mjs,cjs`)
@@ -139,7 +141,7 @@ Flags:
 - `--dominant-helper-min-count <n>` — required tiny low-use helpers beside it (default `2`)
 - `--file <path>` — scan one file
 
-Built-in rules are `no_unused_bindings`, `one_exported_function_per_file`, `max_functions_per_file`, `hoistable_nested_function`, `low_value_function`, `low_value_local_helper`, `dominant_container_tiny_helpers`, and `satellite_cluster`. `satellite_cluster` emits one grouped scan violation when a file has at least two non-exported file-scope helpers of at most eight lines with one or two same-file references; non-trivial helpers must be single-use. The low-value rules are deliberately narrow: trivial bodies are empty, constant/identity/direct-property returns, or direct pass-through calls. `low_value_local_helper` further requires a non-exported top-level ordinary helper with one or two same-file references and excludes React components, hooks, component-local functions, class methods, dead code, nested functions, exports, transformed calls, computed maps, and three-or-more-use functions. `dominant_container_tiny_helpers` emits one grouped review finding when a file has a configured large function/class plus enough non-exported 1–2-use ordinary helpers at or below the tiny-helper line limit. `--loose-low-value` broadens both rules to ordinary small bodies and component-local TSX functions, but still excludes React components, hooks, class methods, exports, tests by default, dead code, and functions with more than two references.
+Built-in rules are `no_unused_bindings`, `one_exported_function_per_file`, `max_functions_per_file`, `aliased_member`, `hoistable_nested_function`, `low_value_function`, `low_value_local_helper`, `dominant_container_tiny_helpers`, and `satellite_cluster`. `satellite_cluster` emits one grouped scan violation when a file has at least two non-exported file-scope helpers of at most eight lines with one or two same-file references; non-trivial helpers must be single-use. The low-value rules are deliberately narrow: trivial bodies are empty, constant/identity/direct-property returns, or direct pass-through calls. `low_value_local_helper` further requires a non-exported top-level ordinary helper with one or two same-file references and excludes React components, hooks, component-local functions, class methods, dead code, nested functions, exports, transformed calls, computed maps, and three-or-more-use functions. `dominant_container_tiny_helpers` emits one grouped review finding when a file has a configured large function/class plus enough non-exported 1–2-use ordinary helpers at or below the tiny-helper line limit. `--loose-low-value` broadens both rules to ordinary small bodies and component-local TSX functions, but still excludes React components, hooks, class methods, exports, tests by default, dead code, and functions with more than two references.
 
 Verbose function output includes `role` (`reactComponent`, `reactHook`, `componentLocal`, `classMethod`, or `helper`), based on JSX, naming, ownership, and function kind, plus each function's dotted parent, sorted captures, and optional `lowValueReason`. Compact function tuples are `[file,line,col,name,exported,kind,parent,captures,lowValueReason]`; violations are `[file,rule,count,details]`.
 
@@ -300,7 +302,7 @@ scanr tree --health --json
         └── *      re-exported from ./events.errors.ts
 ```
 
-Indentation means "lives inside", `()` marks a function, and the middle column carries the kind (`class`, `interface`, `type`, `enum`, `namespace`, `let`, `var`, `getter`, `setter`) and `exported`. `--deep` adds locals, properties, type and enum members, each symbol's callee (`make = Effect.gen`), `extends`, and an `imports` row. `--signatures` replaces `()` with the parameters and return type, and `--exported` keeps only exported symbols and re-exports. `--outline` cannot be combined with `--functions` or `--health`.
+Indentation means "lives inside", `()` marks a function, and the middle column carries the kind (`class`, `interface`, `type`, `enum`, `namespace`, `let`, `var`, `getter`, `setter`) and `exported`. A function handed out under another key shows `exposed as <key>`. `--deep` adds locals, data properties, enum members, each symbol's callee (`make = Effect.gen`), `extends`, and an `imports` row. `--signatures` replaces `()` with the parameters and return type, and `--exported` keeps only exported symbols and re-exports. `--outline` cannot be combined with `--functions` or `--health`.
 
 `--functions` annotates files with dotted function names. Anonymous callbacks are summarized as `+N anonymous`; `--all-functions` expands them. `--low-value-max-lines` controls `[L]` candidates, and `--duplicate-threshold` controls `[D:n]` groups (default `0.87`). Duplicate markers include one-line functions, and exact short matches are not size-penalized.
 
@@ -334,6 +336,7 @@ Group files by name suffix and list the ones that break their group's pattern:
 scanr roles
 scanr roles --min-files 3 --usual 90 --unusual 5
 scanr roles --json
+scanr roles --check
 ```
 
 A file's role is the suffix before its extension: `events.layer.ts` is `.layer`, `index.ts` is `index`, and a file without a suffix is `(no suffix)`. Test files are left out. Each file has traits read from its top-level outline and its resolved imports: every declared name (`` `make` ``, ``exported `layer` ``), every kind of declaration (`exported class`, `internal function`), every producer (`exported const = Config.all`), `re-exports`, and every role it imports (`imports .types`).
@@ -341,6 +344,19 @@ A file's role is the suffix before its extension: `events.layer.ts` is `.layer`,
 A trait shared by at least `--usual` percent of a role's files (default `80`) is usual, and a file without it is reported under `missing`. A kind of declaration or an imported role found in at most `--unusual` percent of the files (default `10`) is reported under `unusual` with its count, such as `imports .fake (1 of 18)`. Names and producers are never unusual, since they vary freely. A role that shares no trait has no pattern to break and reports no odd ones out. Roles with fewer than `--min-files` files (default `5`) are listed at the end, because a one-off suffix can itself be drift.
 
 `--json` emits `{version,roles:[{role,files,usual:[{trait,files}],outliers:[{file,missing,unusual}]}],smallRoles}`.
+
+`--check` turns chosen observations into rules. Write `scanr.json` at the root (or pass `--config <path>`), with traits written exactly as `scanr roles` prints them:
+
+```json
+{
+  "roles": {
+    ".layer": { "require": ["exported `layer`"], "forbid": ["imports .fake"] },
+    ".utils": { "forbid": ["imports .layer", "imports .driver", "imports .fake"] }
+  }
+}
+```
+
+Every file of a role must have each `require` trait and none of the `forbid` traits. The command lists the files that break a rule and exits `1` when there are any, so it works as a CI step or as a gate for an agent. A string that is not a trait fails the run before any file is checked, and a rule whose role has no files is reported. `--check --json` emits `{version,checked,violations:[{file,role,missing?,forbidden?}],unusedRules}`.
 
 ### `scanr deps`
 
@@ -350,11 +366,14 @@ Show what each file imports, resolved to project files, and what imports it:
 scanr deps
 scanr deps --path src/commands
 scanr deps --path src/events.layer.ts --json
+scanr deps --cycles
 ```
 
 Each file lists the project files it imports (marked `(type)` when every import of that module is `import type`), the packages it uses, any relative import that resolves to no file or to several, and the files that import it. Imports include `import`, `export … from`, and literal `import()`. Resolution follows relative paths, `tsconfig.json` `paths` (nearest config, with relative `extends`), and workspace packages linked under `node_modules`. `--path` limits the files shown to one file or directory; importers still come from the whole root, tests included.
 
-`--json` emits `{version,files:[{file,imports:[{source,file?,package?,typeOnly?}],importedBy}]}`. An import with neither `file` nor `package` is unresolved.
+The output starts with the import cycles of the whole root, or `No import cycles.`: one shortest loop per group of files that import each other, and the same between workspace packages (each `package.json` with a `name`). Type-only imports and test files are left out, since neither can form a loop in shipped code. `--cycles` prints only that section.
+
+`--json` emits `{version,cycles:{files,packages},files:[{file,imports:[{source,file?,package?,typeOnly?}],importedBy}]}`. Each cycle is a list of names without the first one repeated. An import with neither `file` nor `package` is unresolved.
 
 ### `scanr diff`
 
@@ -366,7 +385,18 @@ scanr diff --base HEAD~1 --deep
 scanr diff --base main --json
 ```
 
-It compares the outline of every changed file in the working tree with the same file at `--base`. Untracked files count as added, and file renames follow Git. Each changed declaration is one row:
+It compares the outline of every changed file in the working tree with the same file at `--base`. Untracked files count as added, and file renames follow Git.
+
+The output answers "was anything lost?" first: the totals, then every removal that has nothing of the same kind added beside it. A removal with an addition beside it may be a rename the tool could not prove; one without is gone.
+
+```text
+86 files: 185 added, 109 removed, 27 renamed, 0 moved, 187 changed
+
+Removed with nothing of the same kind added beside it (1):
+  src/chat.layer.ts  make.messageList.rows
+```
+
+Then each changed declaration is one row:
 
 ```text
 src/events.layer.ts
@@ -377,9 +407,9 @@ src/events.layer.ts
   - make.legacy()                               removed
 ```
 
-`~` rows without `renamed` describe a symbol that stayed in place: a new signature, `now exported` or `no longer exported`, another kind, producer, or superclass. A symbol is moved when its name and kind left exactly one place and arrived in exactly one place, in the same file or another. A rename is claimed only with evidence: mostly the same members, the same signature for callables (a bare `()` also needs the same length), or the same producer for plain values. Anything else is reported as one removal and one addition. Members of an added, removed, or moved symbol are not listed separately. `--deep` also compares locals, properties, and type and enum members.
+`~` rows without `renamed` describe a symbol that stayed in place: a new signature, `now exported` or `no longer exported`, another kind, producer, or superclass. A symbol is moved when its name and kind left exactly one place and arrived in exactly one place, in the same file or another. A rename is claimed only with evidence: mostly the same members, the same signature for callables (a bare `()` also needs the same length), or the same producer for plain values. Anything else is reported as one removal and one addition. Members of an added, removed, or moved symbol are not listed separately. A changed signature longer than 60 characters is cut to the names that changed, marked with `…`. Functions, classes, types, and methods on interfaces are always compared; `--deep` adds locals, data properties, and enum members.
 
-`--json` emits `{version,base,resolvedBase,files:[{file,status,from?,changes:[{change,symbol,kind,to?,toFile?,details?}]}]}` with `status` one of `added`, `deleted`, `modified`, `renamed`.
+`--json` emits `{version,base,resolvedBase,totals:{files,added,removed,renamed,moved,changed,unreplaced},files:[{file,status,from?,changes:[{change,symbol,kind,to?,toFile?,details?,unreplaced?}]}]}` with `status` one of `added`, `deleted`, `modified`, `renamed`.
 
 ### `scanr xray`
 
@@ -405,8 +435,8 @@ Each section points to the command with full detail: `tree --health`, `slop`, an
 
 1. `scanr xray --root .` — one-page overview before anything else.
 2. `scanr tree --outline --path <folder>` (or `scanr scan --mode outline`) — how each file is organized: nested declarations, wrapped functions, re-exports.
-3. `scanr roles --root .` — which files break the pattern their name suffix promises.
-4. `scanr deps --path <file-or-folder>` — what a file depends on and what depends on it, before moving or splitting it.
+3. `scanr roles --root .` — which files break the pattern their name suffix promises; `scanr roles --check` enforces the rules in `scanr.json`.
+4. `scanr deps --path <file-or-folder>` — what a file depends on and what depends on it, before moving or splitting it; `scanr deps --cycles` for import loops.
 5. `scanr diff --base <ref>` — review a refactor by its declarations: added, removed, renamed, moved, changed.
 6. `scanr scan --mode inventory --root .` — flat name lists (functions, constants, variables, types, components, hooks, classes, enums, namespaces, exports).
 7. `scanr refs <name> --root .` — declarations and usage sites for a name.

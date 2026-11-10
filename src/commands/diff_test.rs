@@ -20,12 +20,7 @@ fn report(root: &Path, deep: bool) -> DiffReport {
         .map(|file| load_versions(&base, file, view))
         .collect::<Result<Vec<_>>>()
         .expect("versions");
-    DiffReport {
-        version: 1,
-        base: "HEAD".to_string(),
-        resolved_base: base.commit,
-        files: diff_outlines(&files),
-    }
+    DiffReport::new("HEAD".to_string(), base.commit, diff_outlines(&files))
 }
 
 fn repository() -> tempfile::TempDir {
@@ -67,6 +62,11 @@ fn compares_the_working_tree_with_the_base_revision() {
     assert_eq!(
         body,
         "
+4 files: 0 added, 1 removed, 0 renamed, 1 moved, 1 changed
+
+Removed with nothing of the same kind added beside it (1):
+  old.ts  legacy
+
 layer.ts
   > make.helper() → helper()  moved to utils.ts
   ~ make.record()             signature (event: Event) → (event: Event, force: boolean)
@@ -108,6 +108,7 @@ fn deep_compares_locals_too() {
 
     let json = serde_json::to_value(&deep).unwrap();
     assert_eq!(json["version"], 1);
+    assert_eq!(json["totals"]["added"], 1);
     assert_eq!(json["files"][0]["status"], "modified");
     assert_eq!(json["files"][0]["changes"][0]["kind"], "const");
 }

@@ -12,7 +12,7 @@ use crate::cli::DiffArgs;
 use crate::git::{Base, resolve_base, run_git};
 use crate::scan::outline::{FileOutline, OutlineView, SymbolKind};
 use crate::scan::outline_diff::{
-    Change, ChangeKind, FileDiff, FileStatus, FileVersions, diff_outlines,
+    Change, ChangeKind, FileDiff, FileStatus, FileVersions, Totals, diff_outlines,
 };
 use crate::scan::typescript::parse::outline_source;
 use crate::scan::{ScanConfig, has_matching_extension};
@@ -23,7 +23,14 @@ struct DiffReport {
     version: u8,
     base: String,
     resolved_base: String,
+    totals: Totals,
     files: Vec<FileDiff>,
+}
+
+impl DiffReport {
+    fn new(base: String, resolved_base: String, files: Vec<FileDiff>) -> Self {
+        Self { version: 1, base, resolved_base, totals: Totals::of(&files), files }
+    }
 }
 
 pub fn run(args: &DiffArgs) -> Result<()> {
@@ -33,12 +40,7 @@ pub fn run(args: &DiffArgs) -> Result<()> {
         .into_par_iter()
         .map(|file| load_versions(&base, file, view))
         .collect::<Result<Vec<_>>>()?;
-    let report = DiffReport {
-        version: 1,
-        base: args.base.clone(),
-        resolved_base: base.commit,
-        files: diff_outlines(&files),
-    };
+    let report = DiffReport::new(args.base.clone(), base.commit, diff_outlines(&files));
 
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
@@ -149,6 +151,7 @@ fn render(report: &DiffReport) -> String {
         out.push_str("\nNo declaration changes.\n");
         return out;
     }
+    out.push_str(&render_summary(report));
     for file in &report.files {
         out.push('\n');
         out.push_str(&file.file);
@@ -170,13 +173,43 @@ fn render(report: &DiffReport) -> String {
     out
 }
 
-fn change_row(change: &Change) -> (String, String) {
-    // `()` marks a function; other kinds are named, since a const and a type can share a name.
-    let call = |path: &str| match change.kind {
+/// The answer to "what happened, and was anything lost?" before the per-file rows.
+fn render_summary(report: &DiffReport) -> String {
+    let totals = report.totals;
+    let mut out = format!(
+        "\n{} files: {} added, {} removed, {} renamed, {} moved, {} changed\n",
+        totals.files, totals.added, totals.removed, totals.renamed, totals.moved, totals.changed
+    );
+    if totals.removed == 0 {
+        return out;
+    }
+    if totals.unreplaced == 0 {
+        out.push_str("Every removal has an addition of the same kind beside it.\n");
+        return out;
+    }
+    out.push_str(&format!(
+        "\nRemoved with nothing of the same kind added beside it ({}):\n",
+        totals.unreplaced
+    ));
+    for file in &report.files {
+        for change in file.changes.iter().filter(|change| change.unreplaced) {
+            out.push_str(&format!("  {}  {}\n", file.file, symbol_label(change, &change.symbol)));
+        }
+    }
+    out
+}
+
+/// `()` marks a function; other kinds are named, since a const and a type can share a name.
+fn symbol_label(change: &Change, path: &str) -> String {
+    match change.kind {
         SymbolKind::Function | SymbolKind::Method | SymbolKind::Constructor => format!("{path}()"),
         SymbolKind::Const => path.to_string(),
         kind => format!("{path} {}", kind.as_str()),
-    };
+    }
+}
+
+fn change_row(change: &Change) -> (String, String) {
+    let call = |path: &str| symbol_label(change, path);
     let symbol = call(&change.symbol);
     let details = change.details.join("; ");
     match change.action {

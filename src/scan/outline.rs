@@ -26,6 +26,24 @@ pub enum SymbolKind {
 }
 
 impl SymbolKind {
+    pub const ALL: [Self; 15] = [
+        Self::Function,
+        Self::Const,
+        Self::Let,
+        Self::Var,
+        Self::Class,
+        Self::Method,
+        Self::Getter,
+        Self::Setter,
+        Self::Constructor,
+        Self::Property,
+        Self::Interface,
+        Self::Type,
+        Self::Enum,
+        Self::EnumMember,
+        Self::Namespace,
+    ];
+
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Function => "function",
@@ -57,6 +75,11 @@ impl SymbolKind {
     pub const fn is_variable(self) -> bool {
         matches!(self, Self::Const | Self::Let | Self::Var)
     }
+
+    /// Kinds whose members are signatures without a body.
+    pub const fn is_type(self) -> bool {
+        matches!(self, Self::Interface | Self::Type)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -78,11 +101,15 @@ pub struct Symbol {
     /// Public names when they differ from `name`, such as `default`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub exported_as: Vec<String>,
+    /// Keys a function is handed out under when they differ from `name`:
+    /// `webhookList` for `webhooks` in `Store.of({ webhookList: webhooks })`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub exposed_as: Vec<String>,
     pub line: u32,
     pub end_line: u32,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Self>,
-    /// Detail symbols are locals, properties, and type or enum members. They
+    /// Detail symbols are locals, data properties, and enum members. They
     /// appear only in the deep view.
     #[serde(skip)]
     pub detail: bool,
@@ -104,6 +131,7 @@ impl Symbol {
             extends: None,
             exported: false,
             exported_as: Vec::new(),
+            exposed_as: Vec::new(),
             line,
             end_line,
             children: Vec::new(),
@@ -169,7 +197,7 @@ pub struct FileOutline {
 /// What an outline shows. The default is declarations and functions only.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct OutlineView {
-    /// Add locals, properties, type and enum members, and imports.
+    /// Add locals, data properties, enum members, and imports.
     pub deep: bool,
     /// Keep the parameters and return type of callables.
     pub signatures: bool,
@@ -191,20 +219,26 @@ impl FileOutline {
         }
     }
 
-    /// Visit every symbol depth-first with its dotted path, such as `make.record`.
-    pub fn walk(&self, visit: &mut impl FnMut(&Symbol, &str)) {
-        fn descend(symbols: &[Symbol], prefix: &str, visit: &mut impl FnMut(&Symbol, &str)) {
+    /// Visit every symbol depth-first with its dotted path, such as
+    /// `make.record`, and the symbol that owns it.
+    pub fn walk(&self, visit: &mut impl FnMut(&Symbol, &str, Option<&Symbol>)) {
+        fn descend(
+            symbols: &[Symbol],
+            prefix: &str,
+            owner: Option<&Symbol>,
+            visit: &mut impl FnMut(&Symbol, &str, Option<&Symbol>),
+        ) {
             for symbol in symbols {
                 let path = if prefix.is_empty() {
                     symbol.name.clone()
                 } else {
                     format!("{prefix}.{}", symbol.name)
                 };
-                visit(symbol, &path);
-                descend(&symbol.children, &path, visit);
+                visit(symbol, &path, owner);
+                descend(&symbol.children, &path, Some(symbol), visit);
             }
         }
-        descend(&self.symbols, "", visit);
+        descend(&self.symbols, "", None, visit);
     }
 }
 

@@ -30,29 +30,31 @@ pub trait Rule: Send + Sync {
     fn check(&self, index: &FileIndex) -> Option<Violation>;
 }
 
-pub fn all_rules() -> Vec<Box<dyn Rule>> {
+fn rules_for(options: RuleOptions) -> Vec<Box<dyn Rule>> {
+    let include_test_files = options.include_test_files;
     vec![
         Box::new(NoUnusedBindings),
         Box::new(OneExportedFunctionPerFile { path_prefix: None }),
         Box::new(MaxFunctionsPerFile { max: 20 }),
-        Box::new(HoistableNestedFunction { include_test_files: false }),
-        Box::new(LowValueFunction { include_test_files: false, max_lines: 3 }),
+        Box::new(AliasedMember { include_test_files }),
+        Box::new(HoistableNestedFunction { include_test_files }),
+        Box::new(LowValueFunction { include_test_files, max_lines: options.low_value_max_lines }),
         Box::new(LowValueLocalHelper {
-            include_test_files: false,
-            max_lines: 3,
+            include_test_files,
+            max_lines: options.low_value_max_lines,
             max_references: 2,
-            loose: false,
+            loose: options.loose_low_value,
         }),
         Box::new(DominantContainerTinyHelpers {
-            include_test_files: false,
-            loose: false,
-            container_min_lines: 300,
-            helper_max_lines: 3,
-            helper_min_count: 2,
+            include_test_files,
+            loose: options.loose_low_value,
+            container_min_lines: options.dominant_container_min_lines,
+            helper_max_lines: options.low_value_max_lines,
+            helper_min_count: options.dominant_helper_min_count,
             max_references: 2,
         }),
         Box::new(SatelliteCluster {
-            include_test_files: false,
+            include_test_files,
             max_lines: 8,
             min_count: 2,
             max_references: 2,
@@ -80,37 +82,9 @@ pub fn run_rules_with_test_files(
 
 pub fn run_rules_with_options(enabled: &[String], index: &mut FileIndex, options: RuleOptions) {
     let enabled_set: HashSet<&str> = enabled.iter().map(String::as_str).collect();
-    let mut rules = all_rules();
-    rules.truncate(3);
-    rules
-        .push(Box::new(HoistableNestedFunction { include_test_files: options.include_test_files }));
-    rules.push(Box::new(LowValueFunction {
-        include_test_files: options.include_test_files,
-        max_lines: options.low_value_max_lines,
-    }));
-    rules.push(Box::new(LowValueLocalHelper {
-        include_test_files: options.include_test_files,
-        max_lines: options.low_value_max_lines,
-        max_references: 2,
-        loose: options.loose_low_value,
-    }));
-    rules.push(Box::new(DominantContainerTinyHelpers {
-        include_test_files: options.include_test_files,
-        loose: options.loose_low_value,
-        container_min_lines: options.dominant_container_min_lines,
-        helper_max_lines: options.low_value_max_lines,
-        helper_min_count: options.dominant_helper_min_count,
-        max_references: 2,
-    }));
-    rules.push(Box::new(SatelliteCluster {
-        include_test_files: options.include_test_files,
-        max_lines: 8,
-        min_count: 2,
-        max_references: 2,
-    }));
-
-    for rule in
-        rules.into_iter().filter(|r| enabled_set.is_empty() || enabled_set.contains(r.name()))
+    for rule in rules_for(options)
+        .into_iter()
+        .filter(|rule| enabled_set.is_empty() || enabled_set.contains(rule.name()))
     {
         if let Some(violation) = rule.check(index) {
             index.violations.push(violation);
@@ -171,6 +145,34 @@ impl Rule for OneExportedFunctionPerFile {
             count: exported_fns.len(),
             details: exported_fns,
         })
+    }
+}
+
+/// A function handed out under a key that differs from its own name, such as
+/// `webhooks` in `Store.of({ webhookList: webhooks })`.
+struct AliasedMember {
+    include_test_files: bool,
+}
+
+impl Rule for AliasedMember {
+    fn name(&self) -> &'static str {
+        "aliased_member"
+    }
+
+    fn check(&self, index: &FileIndex) -> Option<Violation> {
+        if !self.include_test_files && is_test_path(&index.path) {
+            return None;
+        }
+
+        let mut details = Vec::new();
+        index.outline.walk(&mut |symbol, path, _| {
+            details.extend(symbol.exposed_as.iter().map(|key| format!("{path}:{key}")));
+        });
+        if details.is_empty() {
+            return None;
+        }
+
+        Some(Violation { rule: self.name().to_string(), count: details.len(), details })
     }
 }
 

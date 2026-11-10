@@ -83,9 +83,9 @@ impl InventoryLists {
             line: include_lines.then_some(line),
         };
 
-        index.outline.walk(&mut |symbol, path| match symbol.kind {
+        index.outline.walk(&mut |symbol, path, owner| match symbol.kind {
             // Interface and type-literal method signatures are members, not functions.
-            kind if kind.is_callable() && !symbol.detail => {
+            kind if kind.is_callable() && !owner.is_some_and(|owner| owner.kind.is_type()) => {
                 let entry = item(path, None, symbol.line);
                 match symbol.function_position.and_then(|position| roles.get(&position)) {
                     Some(FunctionRole::ReactComponent) => self.components.push(entry.clone()),
