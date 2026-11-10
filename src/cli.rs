@@ -37,13 +37,13 @@ pub enum Commands {
     /// Search file contents or paths
     Search(SearchArgs),
 
-    /// Compact project structure overview for fast orientation
+    /// Project structure tree; --outline adds each file's nested declarations
     Tree(TreeArgs),
 
     /// One-page project overview: shape, hotspots, slop, and duplicates
     Xray(XrayArgs),
 
-    /// Structural scan: extract functions, bindings, and exports from TypeScript/JavaScript files
+    /// Structural scan as JSON: file outlines, name inventory, functions, bindings, exports, rules
     Scan(ScanArgs),
 }
 

@@ -1,18 +1,26 @@
 ---
 name: ts-code-scan
-description: "xray overview, file outline, role drift, dependencies, outline diff, constants, types, functions, tree, slop, refs, rename, census, dupes, and search for offline TypeScript and JavaScript"
+description: "Offline TypeScript/JavaScript structure with scanr. Use to see what a file or folder declares and how it nests, check that files follow their architecture, find what imports a file before moving it, review what a refactor changed, list constants, types, functions or exports, find usages of a name, rename a symbol, find duplicates or slop, or get a project overview."
 allowed-tools: Bash, Read
 ---
 
 If `scanr` is missing: `brew install nikuscs/tap/scanr`. Presenting findings to a human → [REPORTING.md](REPORTING.md).
 
-For any folder, run **one** inventory (not verbose, not compact, not `head`):
+Pick the command by the question, then read its section:
 
-```bash
-scanr scan --mode inventory --root <path>
-```
+| Question | Command |
+| --- | --- |
+| What is in this repo? | `scanr xray` |
+| What does each file declare, and what lives inside what? | `scanr scan --mode outline`, or `scanr tree --outline` for a human |
+| Do these files follow the architecture? | `scanr roles` |
+| What does this file import, and what imports it? | `scanr deps --path <file-or-dir>` |
+| What did this refactor change? | `scanr diff --base <ref>` |
+| Which constants, types, functions or exports exist? | `scanr scan --mode inventory` |
+| Where is this name used? | `scanr refs <name>` |
+| Rename a symbol everywhere | `scanr rename <Name> <NewName>` |
+| Which code is duplicated or low value? | `scanr dupes`, `scanr slop` |
 
-Done when `stats.parsed == stats.files` and `stats.errors == 0`. List nonzero `skipped`/`errors`. Then answer from the JSON keys below. Add `--lines` only if the user wants line numbers.
+Every command takes `--root <path>`. `xray`, `tree`, `roles`, `deps` and `diff` print text; return it as printed. Add `--json` when you need to filter the result.
 
 ## Xray a project
 
@@ -33,7 +41,7 @@ scanr scan --mode outline --root <path>          # JSON for you
 scanr tree --outline --root <path> --path <dir>  # tree for a human
 ```
 
-Each file lists its `symbols` as a tree: `{name, kind, line, endLine}` plus `via` (the callee that produced it, such as `Effect.fn`), `extends`, `exported`, `exportedAs`, and `children`. `reexports` rows carry `from` and either `names` or `all`. A declaration inside an anonymous callback belongs to the nearest named declaration around it, so `record` sits under `make` in `const make = Effect.gen(function* () { const record = … })`.
+`scanr scan --mode outline --schema` prints the field layout. Each file lists its `symbols` as a tree: `{name, kind, line, endLine}` plus `via` (the callee that produced it, such as `Effect.fn`), `extends`, `exported`, `exportedAs`, and `children`. `reexports` rows carry `from` and either `names` or `all`. A declaration inside an anonymous callback belongs to the nearest named declaration around it, so `record` sits under `make` in `const make = Effect.gen(function* () { const record = … })`.
 
 A variable is a `function` only when assigned an arrow, a function expression, or a recognized wrapper (`Effect.fn`, `Effect.fnUntraced`, `memo`, `forwardRef`, `useCallback`, `cache`, `debounce`, `throttle`, `memoize`, `once`, `observer`). Any other call result is a `const` with `via`; read `via` to judge it.
 
@@ -45,7 +53,9 @@ Default output is declarations and functions. `--deep` adds locals, properties, 
 scanr roles --root <path>
 ```
 
-Groups files by name suffix (`*.layer.ts` is `.layer`) and lists, per role, what its files usually have and the files that differ: `missing` a usual trait, or carrying an `unusual` one such as `imports .fake (1 of 18)`. Read each odd one out as a question to check, not a verdict. `--min-files`, `--usual`, and `--unusual` tune the thresholds; `--json` for structured output.
+Groups files by name suffix (`*.layer.ts` is `.layer`) and lists, per role, what its files usually have and the files that differ: `missing` a usual trait, or carrying an `unusual` one such as `imports .fake (1 of 18)`. Each odd one out is a question to check against the project's rules. `--min-files`, `--usual`, and `--unusual` tune the thresholds.
+
+`--json`: `{roles: [{role, files, usual: [{trait, files}], outliers: [{file, missing, unusual: [{trait, files}]}]}], smallRoles: [{role, files}]}`. `smallRoles` are suffixes with too few files to compare; a one-off suffix can itself be drift.
 
 ## What a file depends on, and what depends on it
 
@@ -55,7 +65,9 @@ Before moving, splitting, or deleting a file:
 scanr deps --root <path> --path <file-or-dir>
 ```
 
-Lists resolved project imports (`(type)` when type-only), packages, unresolved relative imports, and `imported by`. Importers come from the whole root, tests included. `--json` for structured output.
+Lists resolved project imports (`(type)` when type-only), packages, unresolved relative imports, and `imported by`. Importers come from the whole root, tests included.
+
+`--json`: `{files: [{file, imports: [{source, file?, package?, typeOnly?}], importedBy}]}`. An import with neither `file` nor `package` is unresolved.
 
 ## Review a refactor by its structure
 
@@ -63,7 +75,19 @@ Lists resolved project imports (`(type)` when type-only), packages, unresolved r
 scanr diff --base <ref> --root <path>
 ```
 
-Compares the working tree's outlines with `<ref>`: `+` added, `-` removed, `>` moved (with the destination file), `~` renamed or changed (signature, exported, kind, producer). Renames are claimed only with evidence, so a rename it cannot prove shows as one removal and one addition. Run it after a refactor to confirm nothing was dropped or left behind. `--deep` includes locals; `--json` for structured output.
+Compares the working tree's outlines with `<ref>`: `+` added, `-` removed, `>` moved (with the destination file), `~` renamed or changed (signature, exported, kind, producer). A rename is claimed only with evidence (same signature, members or producer), so an unproven one shows as one removal and one addition. Run it after a refactor to confirm nothing was dropped or left behind. `--deep` includes locals.
+
+`--json`: `{base, resolvedBase, files: [{file, status, from?, changes: [{change, symbol, kind, to?, toFile?, details?}]}]}`. `status` is `added`, `deleted`, `modified` or `renamed`; `change` is `added`, `removed`, `renamed`, `moved` or `changed`.
+
+## List names
+
+For flat lists of every name in a folder, run **one** inventory:
+
+```bash
+scanr scan --mode inventory --root <path>
+```
+
+Done when `stats.parsed == stats.files` and `stats.errors == 0`. List nonzero `skipped`/`errors`. Then answer from the JSON keys below. Add `--lines` only if the user wants line numbers.
 
 ## Get all constants
 
