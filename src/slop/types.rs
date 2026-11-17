@@ -48,10 +48,13 @@ pub enum SlopKind {
     UnusedFactoryMember,
     TestOnlyFactoryMember,
     ExposureOnlyMember,
+    CopiedType,
+    SingleUseExport,
+    LeftoverReference,
 }
 
 impl SlopKind {
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 31] = [
         Self::SuppressionChain,
         Self::SwallowedFailure,
         Self::UnresolvedApi,
@@ -80,6 +83,9 @@ impl SlopKind {
         Self::UnusedFactoryMember,
         Self::TestOnlyFactoryMember,
         Self::ExposureOnlyMember,
+        Self::CopiedType,
+        Self::SingleUseExport,
+        Self::LeftoverReference,
     ];
 
     pub const fn cli_name(self) -> &'static str {
@@ -112,6 +118,9 @@ impl SlopKind {
             Self::UnusedFactoryMember => "unused-factory-member",
             Self::TestOnlyFactoryMember => "test-only-factory-member",
             Self::ExposureOnlyMember => "exposure-only-member",
+            Self::CopiedType => "copied-type",
+            Self::SingleUseExport => "single-use-export",
+            Self::LeftoverReference => "leftover-reference",
         }
     }
 
@@ -145,6 +154,9 @@ impl SlopKind {
             Self::UnusedFactoryMember => "Unused factory member",
             Self::TestOnlyFactoryMember => "Test-only factory member",
             Self::ExposureOnlyMember => "Exposure-only member",
+            Self::CopiedType => "Copied type",
+            Self::SingleUseExport => "Single-use export",
+            Self::LeftoverReference => "Leftover reference",
         }
     }
 
@@ -178,13 +190,19 @@ impl SlopKind {
             Self::UnusedFactoryMember => 25,
             Self::TestOnlyFactoryMember => 26,
             Self::ExposureOnlyMember => 27,
+            Self::CopiedType => 28,
+            Self::SingleUseExport => 29,
+            Self::LeftoverReference => 30,
         }
     }
 
     pub const fn is_diff_only(self) -> bool {
         matches!(
             self,
-            Self::ScopeInflation | Self::IntroducedReinvention | Self::GeneratedSurfaceBurst
+            Self::ScopeInflation
+                | Self::IntroducedReinvention
+                | Self::GeneratedSurfaceBurst
+                | Self::LeftoverReference
         )
     }
 
@@ -910,6 +928,12 @@ pub struct FileFacts {
     pub factory_members: Vec<FactoryMemberFact>,
     pub property_accesses: BTreeMap<String, Vec<u32>>,
     pub handed_off_calls: BTreeSet<String>,
+    /// Declaration starts of variables initialized with a literal, object, or array.
+    pub literal_constants: BTreeSet<u32>,
+    /// Hash of each class's source without formatting, by declaration start.
+    pub class_fingerprints: BTreeMap<u32, u64>,
+    /// Hash of each interface body or object type literal without formatting, by declaration start.
+    pub model_fingerprints: BTreeMap<u32, u64>,
 }
 
 /// A member of the object literal returned by an exported factory; nested literals

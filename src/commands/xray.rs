@@ -178,6 +178,7 @@ fn build_slop(root: &Path, top: usize) -> Result<SlopSummary> {
     let report = crate::commands::slop::analyze(&SlopArgs {
         root: root.to_string_lossy().to_string(),
         base: None,
+        changed_only: false,
         confidence: SlopConfidence::Medium,
         only: Vec::new(),
         exclude: Vec::new(),

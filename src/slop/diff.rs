@@ -130,9 +130,40 @@ pub fn load_diff_scope(root: &Path, base: &str) -> Result<DiffScope> {
         files.insert(path.clone(), DiffFileScope { path, status, added });
     }
 
+    let untracked = run_git(
+        &root,
+        ["ls-files", "--others", "--exclude-standard", "-z", "--", "."],
+        "enumerate untracked files",
+    )?;
+    for path in untracked.stdout.split(|byte| *byte == 0).filter(|path| !path.is_empty()) {
+        let path = std::str::from_utf8(path)
+            .context("Git lists a non-UTF-8 path, which is unsupported")?
+            .to_string();
+        let added = untracked_added_ranges(&root.join(&path));
+        files.entry(path.clone()).or_insert(DiffFileScope {
+            path,
+            status: DiffFileStatus::Added,
+            added,
+        });
+    }
+
     let dependency_additions =
         load_dependency_additions(&root, &repo_root, root_prefix, &resolved_base, &files)?;
     Ok(DiffScope { requested_base: base.to_string(), resolved_base, files, dependency_additions })
+}
+
+/// Every line of an untracked text file is added; binary or unreadable files add none,
+/// matching how Git reports a tracked binary file.
+fn untracked_added_ranges(path: &Path) -> Vec<LineRange> {
+    let Ok(bytes) = fs::read(path) else { return Vec::new() };
+    if bytes.contains(&0) {
+        return Vec::new();
+    }
+    let Ok(text) = std::str::from_utf8(&bytes) else { return Vec::new() };
+    match u32::try_from(text.lines().count()) {
+        Ok(0) | Err(_) => Vec::new(),
+        Ok(end) => vec![LineRange { start: 1, end }],
+    }
 }
 
 fn parse_name_status(bytes: &[u8]) -> Result<Vec<(String, DiffFileStatus)>> {
@@ -830,7 +861,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_base_loads_staged_and_unstaged_lines_and_ignores_untracked() {
+    fn explicit_base_loads_staged_unstaged_and_untracked_lines() {
         let root = repository();
         fs::write(
             root.path().join("src.ts"),
@@ -843,11 +874,21 @@ mod tests {
             "export const first = 1;\nexport const staged = 2;\nexport const unstaged = 3;\n",
         )
         .unwrap();
-        fs::write(root.path().join("untracked.ts"), "export const ignored = 1;\n").unwrap();
+        fs::write(
+            root.path().join("untracked.ts"),
+            "export const one = 1;\nexport const two = 2;\n",
+        )
+        .unwrap();
+        fs::write(root.path().join("untracked.bin"), [0u8, 1, 2]).unwrap();
+        fs::write(root.path().join(".gitignore"), "ignored.ts\n").unwrap();
+        fs::write(root.path().join("ignored.ts"), "export const ignored = 1;\n").unwrap();
 
         let scope = load_diff_scope(root.path(), "HEAD").unwrap();
         assert_eq!(scope.files["src.ts"].added, vec![LineRange { start: 2, end: 3 }]);
-        assert!(!scope.files.contains_key("untracked.ts"));
+        assert_eq!(scope.files["untracked.ts"].status, DiffFileStatus::Added);
+        assert_eq!(scope.files["untracked.ts"].added, vec![LineRange { start: 1, end: 2 }]);
+        assert!(scope.files["untracked.bin"].added.is_empty());
+        assert!(!scope.files.contains_key("ignored.ts"));
         assert_eq!(scope, load_diff_scope(root.path(), "HEAD").unwrap());
     }
 

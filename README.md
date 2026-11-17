@@ -195,6 +195,9 @@ Report deterministic, evidence-backed review signals:
 ```bash
 scanr slop --root .
 scanr slop --root . --base HEAD~1
+scanr slop --root . --base HEAD        # only uncommitted work
+scanr slop --root . --base 3f2a9c1     # everything since a commit
+scanr slop --root . --base main --changed-only   # only findings on lines the change added
 scanr slop --root . --confidence high --json
 scanr slop --root . --only scope-inflation,introduced-reinvention
 scanr slop --root . --exclude generic-name-cluster --top 20
@@ -210,7 +213,8 @@ These findings are review signals backed by offline syntax, resolution, referenc
 Flags:
 
 - `--root <path>` — analysis root (default `.`)
-- `--base <ref>` — opt into the three diff-only kinds; the ref is resolved to a commit before diffing
+- `--base <ref>` — opt into the four diff-only kinds; compares the working tree, including uncommitted and untracked files, with the ref (`--base HEAD` checks only uncommitted work)
+- `--changed-only` — with `--base`, keep only findings that touch a line the change added; diff-only kinds always stay
 - `--confidence high|medium` — minimum confidence (default `medium`)
 - `--only <kinds>` — retain canonical kebab-case names; comma-separated and repeatable. The new module kinds also accept `passThroughModule` and `oversplitModule`.
 - `--exclude <kinds>` — remove names after `--only`; exclusion wins on overlap
@@ -223,7 +227,7 @@ Flags:
 - `--tsconfig <path>` — tsconfig for `--type-aware`; repeatable for monorepos (default: every `tsconfig.json` under the root outside `node_modules`)
 - `--json` — emit JSON schema version 1 instead of Markdown
 
-`--only`, `--exclude`, `--confidence`, and `--top` apply after enabled analysis completes. Unknown kind names fail before filesystem scanning. With `--base`, Git compares the resolved commit with tracked staged and unstaged working-tree content. Untracked files are excluded. The three diff-only kinds activate only with `--base`; every non-diff detector continues to analyze the whole root.
+`--only`, `--exclude`, `--confidence`, and `--top` apply after enabled analysis completes. Unknown kind names fail before filesystem scanning. With `--base`, Git compares the resolved commit with the working tree: staged, unstaged, and untracked files (gitignored files stay out). Every line of an untracked file counts as added. The four diff-only kinds activate only with `--base`; every non-diff detector continues to analyze the whole root unless `--changed-only` narrows the report to findings with a span or evidence row on an added line.
 
 Canonical kinds:
 
@@ -241,6 +245,8 @@ Canonical kinds:
 | `unused-factory-member` | Medium | A member of the object an exported factory returns is never read. JSON kind: `unusedFactoryMember`. |
 | `test-only-factory-member` | Medium, `--type-aware` | Only test files read the member. JSON kind: `testOnlyFactoryMember`. |
 | `exposure-only-member` | Medium, `--type-aware` | Nothing reads the member, but production code reaches the function it wraps through other wiring. JSON kind: `exposureOnlyMember`. |
+| `copied-type` | Medium | Two or more files declare the same interface, object type (3+ fields) or class with identical code, ignoring formatting. Same-named classes with different code, like per-package service tags, are not copies. JSON kind: `copiedType`. |
+| `single-use-export` | Medium | An exported helper function or literal constant is used by exactly one other production file in the same package, and not by its own file. Skips files with no functions (constants, types, config), component (`.tsx`/`.jsx`) consumers, re-exported names, entrypoints, and files with a single importer (`oversplit-module` covers those). JSON kind: `singleUseExport`. |
 | `low-value-local-helper` | Medium | A balanced-rule top-level trivial helper has only one or two same-file references. |
 | `dominant-container-tiny-helpers` | Medium | A 300+ line function/class sits beside at least two tiny low-use helpers. |
 | `satellite-cluster` | Medium | One file contains at least two non-exported helpers of at most eight lines with one or two local references; non-trivial helpers must be single-use. |
@@ -258,6 +264,7 @@ Canonical kinds:
 | `scope-inflation` | Medium, diff-only | A small runtime edit accompanies broad new files/helpers or a new dependency. |
 | `introduced-reinvention` | Medium, diff-only | A fully added helper resembles a referenced helper outside the diff. |
 | `generated-surface-burst` | Medium, diff-only | A diff adds at least three exports with no resolved analyzed-project references or four literal-only duplicate tests. |
+| `leftover-reference` | Medium, diff-only | A top-level name the change removed or renamed (4+ characters, declared nowhere else), or the path of a file it deleted or moved, is still mentioned in code, comments, strings or docs. Searches tracked and untracked text files outside `.gitignore`; skips lockfiles and changelogs. JSON kind: `leftoverReference`. |
 
 Module findings always skip tests, declaration/generated files, incomplete parses, and known package entrypoints, even with `--include-test-files`. Oversplit counts distinct non-test, non-generated importing files, including type/namespace imports, re-exports, and literal dynamic imports, but not side-effect-only imports. Generated-file detection includes an `automatically generated` marker in the first ten lines. Repeat `--oversplit-allow-importer` to combine exemptions, for example `--oversplit-allow-importer '*.service.ts' --oversplit-allow-importer 'rpc.router.ts' --oversplit-allow-importer 'vite.config.ts'`. It is a review signal, not proof that a file should be merged: public APIs, domain boundaries, and framework conventions can justify a small file. Import counts use the existing offline module resolver; unresolved aliases, non-literal dynamic imports, and external consumers are not counted. Pass-through proof is conservative: transformed/default arguments, side effects, async wrappers, and unsupported syntax are not reported.
 
@@ -266,7 +273,7 @@ Factory members come from the single top-level `return { ... }` (or arrow expres
 - **Syntactic (default)** — name-based and offline. A member is reported only when no analyzed file reads a property with that name (`a.b`, `a?.b`, `a['b']`, `{ b } = a`, `{ b: c }`, parameter destructuring, `<a.B />`, `typeof a.b`, `T['b']`) outside the member's own declaration. It misses members whose name is read anywhere else, by design. Factories with no member read at all, or whose call result is passed straight to another call (`f(make())`, `f({ key: make() })`), are skipped because a library may consume the whole object.
 - **Type-aware (`--type-aware`)** — the bundled TypeScript worker builds one program per tsconfig and resolves every property access, element access, destructuring and indexed type to the returned members, across all programs. Test files use the same classification as the rest of `slop`. References in type positions (`Service['member']`, `typeof service.member`) are counted as type-only and do not keep a member alive. A member is `exposure-only` when it (or every forwarding member below it) wraps a function, value or local object that production code references outside the member. When a factory result flows into another declared type (an annotated return type, a typed parameter or property), reads through that type count for the member; when it flows into a library type (`streamText({ tools: makeTools() })`), the factory is skipped. The TypeScript compiler (6.x, bundled through ts-morph) can throw on code it type-checks lazily, such as a `Debug Failure` assertion on heavily generic calls: the worker skips that one query, reports `file:line` as a warning, and does not report members whose read it could have missed. When the worker fails outright (a crash or a garbled reply), the run still finishes with a warning and the syntactic member findings.
 
-Limitations: generated files and declaration files are excluded using path/header conventions; tests and package entrypoints receive detector-specific exclusions; dynamic imports, reflective/string-based use, unresolved re-exports, and incomplete parses limit absence claims; analyzed-project reference counts cannot prove that public exports have no external package, plugin, or generated consumers; option/config-property burst detection stays disabled without exact type-resolved ownership; structural similarity does not prove semantic interchangeability; diff scope excludes untracked files and cannot infer the user's requested scope. The tool remains offline and makes no AI-authorship, precision/recall, or universal quality claim.
+Limitations: generated files and declaration files are excluded using path/header conventions; tests and package entrypoints receive detector-specific exclusions; dynamic imports, reflective/string-based use, unresolved re-exports, and incomplete parses limit absence claims; analyzed-project reference counts cannot prove that public exports have no external package, plugin, or generated consumers; option/config-property burst detection stays disabled without exact type-resolved ownership; structural similarity does not prove semantic interchangeability; diff scope cannot infer the user's requested scope. The tool remains offline and makes no AI-authorship, precision/recall, or universal quality claim.
 
 ### `scanr tree`
 
@@ -387,6 +394,8 @@ scanr diff --base main --json
 
 It compares the outline of every changed file in the working tree with the same file at `--base`. Untracked files count as added, and file renames follow Git.
 
+`--base` takes any Git ref, for both `diff` and `slop`: a commit hash, tag, branch, or `HEAD~3`. Later commits, uncommitted edits and untracked files all count; gitignored files do not. Use `--base HEAD` for only uncommitted work, and `--base "$(git merge-base main HEAD)"` for a whole branch without what landed on main after you branched. Checking only one past commit's own changes, without your current work, is not supported; run it in a clean checkout of that commit with `--base <sha>^`.
+
 The output answers "was anything lost?" first: the totals, then every removal that has nothing of the same kind added beside it. A removal with an addition beside it may be a rename the tool could not prove; one without is gone.
 
 ```text
@@ -442,7 +451,7 @@ Each section points to the command with full detail: `tree --health`, `slop`, an
 7. `scanr refs <name> --root .` — declarations and usage sites for a name.
 8. `scanr rename <Name|file#Name> <NewName> --root . --dry-run` — preview a type-accurate rename, then rerun without `--dry-run` and review `leftovers`.
 9. `scanr slop --root .` — review exact, contextual, and test-theater signals one finding per row.
-10. `scanr slop --root . --base HEAD~1` — add the three tracked-working-tree diff signals.
+10. `scanr slop --root . --base HEAD~1` — add the four diff signals for everything changed since the ref, committed or not; `--changed-only` reviews just the new code.
 11. `scanr tree --health --only-findings --top 20` — rank metric-backed hotspots.
 12. `scanr tree --functions --function-details --path <hotspot>` — inspect ownership and similarity in context.
 13. `scanr scan --mode verbose --rules hoistable_nested_function,low_value_function` — inspect captures and rule evidence.

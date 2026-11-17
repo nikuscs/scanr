@@ -7,6 +7,7 @@ use anyhow::{Context, Result, bail};
 use crate::cli::SlopArgs;
 use crate::scan::rules::is_test_path;
 use crate::slop::diff::{detect_diff_findings, load_diff_scope};
+use crate::slop::leftovers::detect_leftovers;
 use crate::slop::member_detectors::detect_type_aware;
 use crate::slop::output::{SlopFilter, SlopOutputFormat, filter_and_sort_findings, write_report};
 use crate::slop::types::{SlopKind, SlopOptions, SlopReport};
@@ -39,10 +40,14 @@ pub fn analyze(args: &SlopArgs) -> Result<SlopReport> {
         .into_iter()
         .flat_map(|detector| detector.detect(&facts))
         .collect::<Vec<_>>();
-    if let Some(scope) = &diff {
-        findings.extend(detect_diff_findings(&facts, scope));
-    }
     let mut warnings = Vec::new();
+    if let (Some(scope), Some(base)) = (&diff, args.base.as_deref()) {
+        findings.extend(detect_diff_findings(&facts, scope));
+        match detect_leftovers(&root, base, &facts) {
+            Ok(leftovers) => findings.extend(leftovers),
+            Err(error) => warnings.push(format!("leftover-reference skipped: {error:#}")),
+        }
+    }
     if args.type_aware {
         let type_aware = detect_type_aware(&root, &args.tsconfig, &args.member_factory)?;
         warnings = type_aware.warnings;
@@ -50,6 +55,15 @@ pub fn analyze(args: &SlopArgs) -> Result<SlopReport> {
             findings.retain(|finding| finding.kind != SlopKind::UnusedFactoryMember);
             findings.extend(type_aware);
         }
+    }
+    if args.changed_only
+        && let Some(scope) = &diff
+    {
+        findings.retain(|finding| {
+            finding.kind.is_diff_only()
+                || scope.intersects(&finding.span)
+                || finding.evidence.iter().any(|row| scope.intersects(&row.span))
+        });
     }
     findings.retain(|finding| {
         args.include_test_files
@@ -115,6 +129,7 @@ mod tests {
         SlopArgs {
             root: ".".to_string(),
             base: None,
+            changed_only: false,
             confidence: SlopConfidence::Medium,
             only: Vec::new(),
             exclude: Vec::new(),
@@ -201,6 +216,38 @@ mod tests {
         assert!(kind_requires_test_subject(SlopKind::NonExecutingTest));
         assert!(kind_requires_test_subject(SlopKind::AssertionMonoculture));
         assert!(is_test_path("src/value.test.ts"));
+    }
+
+    #[test]
+    fn changed_only_keeps_findings_on_added_lines() {
+        let root = tempdir().unwrap();
+        let path = root.path();
+        let git = |args: &[&str]| {
+            let status =
+                std::process::Command::new("git").args(args).current_dir(path).status().unwrap();
+            assert!(status.success(), "git {args:?}");
+        };
+        let old = "export interface Old { a: string; b: string; c: string }\n";
+        let new = "export interface Fresh { x: number; y: number; z: number }\n";
+        git(&["init", "-q"]);
+        git(&["config", "user.email", "scanr@example.invalid"]);
+        git(&["config", "user.name", "scanr test"]);
+        fs::write(path.join("a.ts"), old).unwrap();
+        fs::write(path.join("b.ts"), old).unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-qm", "base"]);
+        fs::write(path.join("c.ts"), new).unwrap();
+        fs::write(path.join("d.ts"), new).unwrap();
+
+        let mut input = args();
+        input.root = path.to_string_lossy().into_owned();
+        input.base = Some("HEAD".to_string());
+        input.only = vec!["copied-type".to_string()];
+        assert_eq!(analyze(&input).unwrap().findings.len(), 2);
+        input.changed_only = true;
+        let findings = analyze(&input).unwrap().findings;
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].evidence[0].code, "Fresh");
     }
 
     #[test]

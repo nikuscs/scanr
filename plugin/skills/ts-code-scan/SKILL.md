@@ -16,12 +16,28 @@ Pick the command by the question, then read its section:
 | What does this file import, and what imports it? | `scanr deps --path <file-or-dir>` |
 | Are there import cycles? | `scanr deps --cycles` |
 | What did this refactor change? | `scanr diff --base <ref>` |
+| Did my change add slop? | `scanr slop --base <ref> --changed-only` |
 | Which constants, types, functions or exports exist? | `scanr scan --mode inventory` |
 | Where is this name used? | `scanr refs <name>` |
 | Rename a symbol everywhere | `scanr rename <Name> <NewName>` |
 | Which code is duplicated or low value? | `scanr dupes`, `scanr slop` |
 
 Every command takes `--root <path>`. `xray`, `tree`, `roles`, `deps` and `diff` print text; return it as printed. Read the whole output: it is ordered so the answer comes first. Add `--json` and process it with a script when it is long.
+
+## Pick `--base`
+
+`diff` and `slop` compare a Git ref with the working tree: commits since the ref, uncommitted edits, and untracked files outside `.gitignore`.
+
+| Scope | `--base` |
+| --- | --- |
+| Uncommitted work | `HEAD` |
+| Everything since a commit | `<sha>`, a tag, or `HEAD~N` |
+| This branch | `"$(git merge-base main HEAD)"` |
+| One past commit alone | `<sha>^`, run in a clean checkout of `<sha>` |
+
+For branch scope, use the merge base: `--base main` also counts commits that landed on main after the branch point.
+
+`slop --changed-only` keeps findings on the lines the change added, plus the diff-only kinds; use it to review an agent's work.
 
 ## Xray a project
 
@@ -145,7 +161,7 @@ JSON `leftovers` lists old-name occurrences the checker cannot rewrite — strin
 
 ## After names are known
 
-Compact or verbose `scanr scan` for lines, captures, export flags, violations. `scanr scan --schema` for compact field layout. `scanr search "<name>" --json` for a literal hunt. `scanr dupes` for similar functions/types. `scanr slop` for slop evidence (`--base <ref>` only for tracked diff kinds).
+Compact or verbose `scanr scan` for lines, captures, export flags, violations. `scanr scan --schema` for compact field layout. `scanr search "<name>" --json` for a literal hunt. `scanr dupes` for similar functions/types. `scanr slop` for slop evidence (`--base <ref>` adds the diff-only kinds; see Pick `--base`).
 
 ## Refactor census
 
@@ -155,9 +171,9 @@ Compact or verbose `scanr scan` for lines, captures, export flags, violations. `
 
 ## Slop kinds
 
-`suppression-chain`, `swallowed-failure`, `unresolved-api`, `async-misuse`, `dead-surface`, `non-executing-test`, `reinvented-helper`, `low-value-local-helper`, `dominant-container-tiny-helpers`, `redundant-defense`, `one-use-abstraction`, `patch-stack`, `speculative-model`, `comment-inversion`, `parallel-representation`, `generic-name-cluster`, `assertion-monoculture`, `mock-dominated-test`, `duplicated-test-body`, `implementation-mirroring-test`, `scope-inflation`, `introduced-reinvention`, `generated-surface-burst`, `pass-through-module`, `oversplit-module`, `unused-factory-member`, `test-only-factory-member`, `exposure-only-member`.
+`suppression-chain`, `swallowed-failure`, `unresolved-api`, `async-misuse`, `dead-surface`, `non-executing-test`, `reinvented-helper`, `low-value-local-helper`, `dominant-container-tiny-helpers`, `redundant-defense`, `one-use-abstraction`, `patch-stack`, `speculative-model`, `comment-inversion`, `parallel-representation`, `generic-name-cluster`, `assertion-monoculture`, `mock-dominated-test`, `duplicated-test-body`, `implementation-mirroring-test`, `scope-inflation`, `introduced-reinvention`, `generated-surface-burst`, `pass-through-module`, `oversplit-module`, `unused-factory-member`, `test-only-factory-member`, `exposure-only-member`, `copied-type`, `single-use-export`, `leftover-reference`.
 
-The first six are High. The rest are Medium. `scope-inflation`, `introduced-reinvention` and `generated-surface-burst` are diff-only and need `--base`. `test-only-factory-member` and `exposure-only-member` need `--type-aware`.
+The first six are High. The rest are Medium. `scope-inflation`, `introduced-reinvention`, `generated-surface-burst` and `leftover-reference` are diff-only and need `--base`. `test-only-factory-member` and `exposure-only-member` need `--type-aware`.
 
 Dead members of factory-returned services (`makeRedisService` returning an unused `decrement`): `scanr slop --root <path> --type-aware --member-factory 'make*Service' --only unusedFactoryMember,testOnlyFactoryMember,exposureOnlyMember`. Add `--tsconfig <path>` once per app in a monorepo. Needs bun or node.
 

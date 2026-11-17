@@ -24,4 +24,4 @@ Later lanes must omit or downgrade findings that depend on these proofs. They mu
 
 ## Phase boundary
 
-`--base` is present in the CLI contract but is rejected with an explicit message until the diff-aware phase is implemented; no Git command runs in Phase 1–3. `--only` and `--exclude` validate all reserved detector names before scanning. With the empty registry, Markdown emits the stable table header and JSON emits schema version 1 with an empty `findings` array.
+In Phase 1–3, `--base` was rejected and no Git command ran. It is now implemented: see the README's `scanr slop` section. `--only` and `--exclude` validate all reserved detector names before scanning. With the empty registry, Markdown emits the stable table header and JSON emits schema version 1 with an empty `findings` array.

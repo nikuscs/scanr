@@ -110,14 +110,19 @@ pub struct DupesArgs {
 }
 
 #[derive(clap::Args, Clone)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct SlopArgs {
     /// Project root directory
     #[arg(long, default_value = ".")]
     pub root: String,
 
-    /// Git base ref that enables the three diff-only finding kinds
+    /// Git ref (commit hash, tag, branch, HEAD~N) that enables the four diff-only kinds; uncommitted and untracked files count
     #[arg(long)]
     pub base: Option<String>,
+
+    /// With --base, keep only findings on lines the change added (diff-only kinds always stay)
+    #[arg(long, requires = "base")]
+    pub changed_only: bool,
 
     /// Minimum confidence to include
     #[arg(long, value_enum, default_value_t = crate::slop::types::SlopConfidence::Medium)]
@@ -283,7 +288,7 @@ pub struct DepsArgs {
 
 #[derive(clap::Args, Clone)]
 pub struct DiffArgs {
-    /// Git revision to compare the working tree against
+    /// Git ref to compare the working tree against: commit hash, tag, branch, or HEAD~N
     #[arg(long)]
     pub base: String,
 

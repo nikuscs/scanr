@@ -767,6 +767,8 @@ impl FactCollector<'_, '_> {
         let exported = self.exported_names.contains(&name);
         let mut fields = Vec::new();
         if let TSType::TSTypeLiteral(literal) = &alias.type_annotation {
+            let fingerprint = fingerprint(self.source_slice(literal.span));
+            self.facts.model_fingerprints.insert(alias.id.span.start, fingerprint);
             for signature in &literal.members {
                 if let TSSignature::TSPropertySignature(property) = signature
                     && let Some(field_name) = property.key.name()
@@ -864,6 +866,8 @@ impl FactCollector<'_, '_> {
         let name = interface.id.name.to_string();
         let exported = self.exported_names.contains(&name);
         let mut fields = Vec::new();
+        let fingerprint = fingerprint(self.source_slice(interface.body.span));
+        self.facts.model_fingerprints.insert(interface.id.span.start, fingerprint);
         for signature in &interface.body.body {
             if let TSSignature::TSPropertySignature(property) = signature
                 && let Some(field_name) = property.key.name()
@@ -1438,6 +1442,8 @@ impl<'a> Visit<'a> for FactCollector<'a, '_> {
             AstKind::TSTypeAliasDeclaration(alias) => self.collect_type_alias(alias),
             AstKind::Class(class) => {
                 if let Some(identifier) = &class.id {
+                    let fingerprint = fingerprint(self.source_slice(class.span));
+                    self.facts.class_fingerprints.insert(identifier.span.start, fingerprint);
                     self.push_simple_declaration(
                         identifier.name.to_string(),
                         class.span,
@@ -1464,7 +1470,11 @@ impl<'a> Visit<'a> for FactCollector<'a, '_> {
                         Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
                     )
                 ) {
+                    let literal = declarator.init.as_ref().is_some_and(is_literal_value);
                     for identifier in declarator.id.get_binding_identifiers() {
+                        if literal {
+                            self.facts.literal_constants.insert(identifier.span.start);
+                        }
                         self.push_simple_declaration(
                             identifier.name.to_string(),
                             declarator.span,
@@ -2377,6 +2387,40 @@ const fn is_runtime_node(kind: AstKind<'_>) -> bool {
             | AstKind::NewExpression(_)
             | AstKind::AssignmentExpression(_)
     )
+}
+
+/// Stable hash of source text without whitespace or `;` / `,` separators, so
+/// formatting alone never makes two copies look different.
+fn fingerprint(text: &str) -> u64 {
+    let mut hasher = std::hash::DefaultHasher::new();
+    for character in text
+        .chars()
+        .filter(|character| !character.is_whitespace() && !matches!(character, ';' | ','))
+    {
+        std::hash::Hash::hash(&character, &mut hasher);
+    }
+    std::hash::Hasher::finish(&hasher)
+}
+
+/// A literal, template without substitutions, object, or array, optionally under
+/// `as` / `satisfies`: a value that holds data rather than computing it.
+fn is_literal_value(expression: &Expression<'_>) -> bool {
+    match expression {
+        Expression::StringLiteral(_)
+        | Expression::NumericLiteral(_)
+        | Expression::BooleanLiteral(_)
+        | Expression::NullLiteral(_)
+        | Expression::BigIntLiteral(_)
+        | Expression::RegExpLiteral(_)
+        | Expression::ObjectExpression(_)
+        | Expression::ArrayExpression(_) => true,
+        Expression::TemplateLiteral(template) => template.expressions.is_empty(),
+        Expression::UnaryExpression(unary) => is_literal_value(&unary.argument),
+        Expression::TSAsExpression(inner) => is_literal_value(&inner.expression),
+        Expression::TSSatisfiesExpression(inner) => is_literal_value(&inner.expression),
+        Expression::ParenthesizedExpression(inner) => is_literal_value(&inner.expression),
+        _ => false,
+    }
 }
 
 #[cfg(test)]

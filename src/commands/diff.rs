@@ -53,6 +53,16 @@ pub fn run(args: &DiffArgs) -> Result<()> {
     Ok(())
 }
 
+/// Declaration changes between `base` and the working tree, one entry per changed file.
+pub fn declaration_changes(base: &Base) -> Result<Vec<FileDiff>> {
+    let view = OutlineView { deep: false, signatures: true, exported: false };
+    let files = changed_files(base)?
+        .into_par_iter()
+        .map(|file| load_versions(base, file, view))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(diff_outlines(&files))
+}
+
 struct ChangedFile {
     path: String,
     status: FileStatus,
