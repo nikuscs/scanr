@@ -32,10 +32,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # pin action
-        with:
-          toolchain: stable
-          components: rustfmt, clippy
+      - name: Install Rust from rust-toolchain.toml
+        run: rustup toolchain install
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
       - name: Format
         run: cargo fmt --all -- --check
@@ -181,11 +179,10 @@ jobs:
         with:
           ref: ${{ needs.create-tag.outputs.tag }}
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # pin action
-        with:
-          toolchain: stable
-          targets: ${{ matrix.target }}
+      - name: Install Rust from rust-toolchain.toml
+        run: |
+          rustup toolchain install
+          rustup target add ${{ matrix.target }}
 
       - name: Cache
         uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1

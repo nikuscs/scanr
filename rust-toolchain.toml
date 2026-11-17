@@ -1,0 +1,5 @@
+# One Rust version for this Mac and CI. Bump it here to move both.
+[toolchain]
+channel = "1.100.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"
