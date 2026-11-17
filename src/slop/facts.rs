@@ -517,7 +517,7 @@ impl FactCollector<'_, '_> {
                 self.facts.export_surface.names.insert(name.clone(), full_span.clone());
             }
             self.facts.declarations.push(DeclarationFact {
-                key: key.clone(),
+                key,
                 span: full_span,
                 body_span: None,
                 scope: ScopeKey::Module(self.path.to_string()),

@@ -887,7 +887,7 @@ mod tests {
         assert_eq!(scope.files["src.ts"].added, vec![LineRange { start: 2, end: 3 }]);
         assert_eq!(scope.files["untracked.ts"].status, DiffFileStatus::Added);
         assert_eq!(scope.files["untracked.ts"].added, vec![LineRange { start: 1, end: 2 }]);
-        assert!(scope.files["untracked.bin"].added.is_empty());
+        assert_eq!(scope.files["untracked.bin"].added, []);
         assert!(!scope.files.contains_key("ignored.ts"));
         assert_eq!(scope, load_diff_scope(root.path(), "HEAD").unwrap());
     }
